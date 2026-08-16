@@ -49,7 +49,8 @@ class DemoApp(ctk.CTk):
             "end",
             "Yellow boxes = the 4 table rows we measure.\n"
             "Green box = that row looks like WINNER (bright green).\n"
-            "S/H/C/D numbers = green minus red. Only a large + number is a winner.\n"
+            "mode=brave_cdp: grabs the game tab even if this window is in front.\n"
+            "mode=screen: old desktop box (game must be visible).\n"
             "This does not read cards, odds, or 'to go' yet.\n\n",
         )
 
@@ -75,9 +76,18 @@ class DemoApp(ctk.CTk):
         wait = float(region.get("delay_seconds", 5))
         every = float(region.get("interval_seconds", 30))
         self.looping = True
-        self.status.configure(
-            text=f"Click Brave now. First shot in {wait:.0f}s, then every {every:.0f}s. Stop to end."
-        )
+        mode = str(region.get("mode", "screen"))
+        if mode.lower() in {"brave_cdp", "brave", "cdp"}:
+            hint = (
+                f"Brave CDP mode: UI can stay in front. First shot in {wait:.0f}s, "
+                f"then every {every:.0f}s."
+            )
+        else:
+            hint = (
+                f"Screen mode: click Brave so the game is visible. "
+                f"First shot in {wait:.0f}s, then every {every:.0f}s."
+            )
+        self.status.configure(text=hint)
         self.after_id = self.after(int(wait * 1000), self._loop_tick)
 
     def stop_loop(self) -> None:

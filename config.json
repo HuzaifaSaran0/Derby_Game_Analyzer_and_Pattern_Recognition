@@ -1,6 +1,11 @@
 {
-  "notes": "Brave, game at 80% zoom. Capture box is the Derby Race panel only (not sidebar, not Matched Bets). Do not change zoom without re-checking live PNGs.",
+  "notes": "Use mode brave_cdp for background capture (Ubuntu + Windows). Start Brave with --remote-debugging-port=9222 after closing all Brave windows. Keep zoom at 80%. page_crop is inside the browser tab (not the whole desktop).",
   "capture": {
+    "mode": "brave_cdp",
+    "cdp_host": "127.0.0.1",
+    "cdp_port": 9222,
+    "url_contains": "bpexch.live",
+    "page_crop": null,
     "left": 200,
     "top": 120,
     "width": 773,

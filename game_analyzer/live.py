@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from game_analyzer.capture import grab_region, list_monitors
+from game_analyzer.capture import grab_frame, list_brave_tabs, list_monitors
 from game_analyzer.config import load_config
 from game_analyzer.vision import draw_table_overlay, extract_real, write_image
 
@@ -21,10 +21,9 @@ LIVE_DIR = ROOT / "fixtures" / "live"
 
 
 def capture_once(config: dict | None = None):
-    """Grab the configured box, save PNG + overlay, return (raw_path, frame, result)."""
+    """Grab via screen box or Brave CDP, save PNG + overlay, return paths/result."""
     config = config or load_config()
-    region = config["capture"]
-    frame = grab_region(region)
+    frame = grab_frame(config)
     result = extract_real(frame, config)
     LIVE_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%H-%M-%S-%f")[:15]
@@ -38,15 +37,18 @@ def capture_once(config: dict | None = None):
 
 def grab_and_analyze(delay: float | None = None) -> None:
     config = load_config()
-    region = config["capture"]
-    wait = float(delay if delay is not None else region.get("delay_seconds", 5))
-
-    print("We do not open a browser.")
-    print("Put the bpexch game in this desktop box:")
-    print(
-        f"  left={region['left']}  top={region['top']}  "
-        f"width={region['width']}  height={region['height']}"
-    )
+    capture = config["capture"]
+    wait = float(delay if delay is not None else capture.get("delay_seconds", 5))
+    mode = str(capture.get("mode", "screen"))
+    if mode.lower() in {"brave_cdp", "brave", "cdp"}:
+        print(f"Mode=brave_cdp  port={capture.get('cdp_port', 9222)}")
+        print("Your analyzer UI can stay in front; Brave does not need to be visible.")
+    else:
+        print("Mode=screen  (game must be visible in the capture box)")
+        print(
+            f"  left={capture['left']}  top={capture['top']}  "
+            f"width={capture['width']}  height={capture['height']}"
+        )
     print(f"Grabbing in {wait:.0f} seconds…")
     time.sleep(wait)
     _print_capture(capture_once(config))
@@ -54,14 +56,27 @@ def grab_and_analyze(delay: float | None = None) -> None:
 
 def loop_forever(delay: float | None = None, interval: float | None = None) -> None:
     config = load_config()
-    region = config["capture"]
-    wait = float(delay if delay is not None else region.get("delay_seconds", 5))
-    every = float(interval if interval is not None else region.get("interval_seconds", 30))
-    print(f"First grab in {wait:.0f}s, then every {every:.0f}s. Ctrl+C to stop.")
+    capture = config["capture"]
+    wait = float(delay if delay is not None else capture.get("delay_seconds", 5))
+    every = float(interval if interval is not None else capture.get("interval_seconds", 30))
+    print(f"Mode={capture.get('mode', 'screen')}  first in {wait:.0f}s, every {every:.0f}s. Ctrl+C to stop.")
     time.sleep(wait)
     while True:
         _print_capture(capture_once(config))
         time.sleep(every)
+
+
+def print_tabs() -> None:
+    config = load_config()
+    capture = config["capture"]
+    host = str(capture.get("cdp_host", "127.0.0.1"))
+    port = int(capture.get("cdp_port", 9222))
+    tabs = list_brave_tabs(host, port)
+    print(f"Brave tabs on {host}:{port}")
+    for tab in tabs:
+        if tab.get("type") != "page":
+            continue
+        print(f"  {tab.get('title', '')[:40]!r}  {tab.get('url', '')}")
 
 
 def _print_capture(saved) -> None:
@@ -84,11 +99,15 @@ def main() -> None:
         description="Screenshot the desktop region in config.json and parse the winner row."
     )
     parser.add_argument("--list-monitors", action="store_true")
+    parser.add_argument("--list-tabs", action="store_true", help="list Brave CDP tabs")
     parser.add_argument("--loop", action="store_true", help="grab every interval_seconds until Ctrl+C")
     parser.add_argument("--delay", type=float, default=None, help="seconds before first grab")
     args = parser.parse_args()
     if args.list_monitors:
         print_monitors()
+        return
+    if args.list_tabs:
+        print_tabs()
         return
     if args.loop:
         loop_forever(args.delay)
