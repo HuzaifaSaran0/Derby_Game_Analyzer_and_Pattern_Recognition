@@ -1,0 +1,47 @@
+{
+  "images/in_progress.png": {
+    "race_state": "IN_PROGRESS",
+    "winner_suit": null,
+    "high_low": null
+  },
+  "images/finished_spades_high.png": {
+    "race_state": "FINISHED",
+    "winner_suit": "SPADES",
+    "high_low": "HIGH"
+  },
+  "images/finished_spades_low.png": {
+    "race_state": "FINISHED",
+    "winner_suit": "SPADES",
+    "high_low": "LOW"
+  },
+  "images/finished_hearts_high.png": {
+    "race_state": "FINISHED",
+    "winner_suit": "HEARTS",
+    "high_low": "HIGH"
+  },
+  "images/finished_hearts_low.png": {
+    "race_state": "FINISHED",
+    "winner_suit": "HEARTS",
+    "high_low": "LOW"
+  },
+  "images/finished_clubs_high.png": {
+    "race_state": "FINISHED",
+    "winner_suit": "CLUBS",
+    "high_low": "HIGH"
+  },
+  "images/finished_clubs_low.png": {
+    "race_state": "FINISHED",
+    "winner_suit": "CLUBS",
+    "high_low": "LOW"
+  },
+  "images/finished_diamonds_high.png": {
+    "race_state": "FINISHED",
+    "winner_suit": "DIAMONDS",
+    "high_low": "HIGH"
+  },
+  "images/finished_diamonds_low.png": {
+    "race_state": "FINISHED",
+    "winner_suit": "DIAMONDS",
+    "high_low": "LOW"
+  }
+}
