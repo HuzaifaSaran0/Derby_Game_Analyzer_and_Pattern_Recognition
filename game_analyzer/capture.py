@@ -174,6 +174,61 @@ def _apply_crop(frame: np.ndarray, crop: dict | None) -> np.ndarray:
     return frame[top : top + height, left : left + width].copy()
 
 
+def auto_crop_derby_panel(frame: np.ndarray) -> np.ndarray:
+    """Keep Derby Race only: drop sidebar, Matched Bets, and top site/game navbar."""
+    rgb = frame[:, :, ::-1]
+    h, w, _ = rgb.shape
+    mid = rgb[h // 5 : (4 * h) // 5]
+    lum = mid.mean(axis=2)
+    white = (lum > 220).mean(axis=0)
+    dark = (lum < 80).mean(axis=0)
+
+    # Left = end of dark sidebar (+ thin white gutter). Do not skip the dark track.
+    left = 0
+    x = 0
+    while x < w // 3 and dark[x] > 0.55:
+        x += 1
+    while x < w // 3 and white[x] > 0.5:
+        x += 1
+    # Pull back so Handicap Cards / suit labels are not clipped.
+    left = max(0, x - 18)
+
+    # Right = before the tall white Matched Bets panel.
+    right = w
+    run = 0
+    for x in range(w - 1, w // 2, -1):
+        if white[x] > 0.65:
+            run += 1
+            if run >= 30:
+                right = x + 1
+                while right > w // 2 and white[right - 1] > 0.65:
+                    right -= 1
+                break
+        else:
+            run = 0
+
+    # Top = below Dashboard + Lobby/Hold'em teal navbar (last bright band in top quarter).
+    row = rgb.mean(axis=(1, 2))
+    top = 0
+    y_limit = max(40, h // 4)
+    in_bright = False
+    last_bright_end = 0
+    for y in range(y_limit):
+        bright = row[y] > 170
+        if bright:
+            in_bright = True
+            last_bright_end = y
+        elif in_bright:
+            last_bright_end = y
+            in_bright = False
+    if last_bright_end > 20:
+        top = min(h - 50, last_bright_end + 2)
+
+    if right - left < w // 3:
+        return frame
+    return frame[top:h, left:right].copy()
+
+
 def grab_brave_tab(capture: dict) -> np.ndarray:
     """Screenshot the bpexch tab via Brave CDP. Works even if our app is in front.
 
@@ -186,7 +241,12 @@ def grab_brave_tab(capture: dict) -> np.ndarray:
     tab = _pick_game_tab(tabs, needle)
     png = _cdp_screenshot_png(tab["webSocketDebuggerUrl"])
     frame = _png_bytes_to_bgr(png)
-    return _apply_crop(frame, capture.get("page_crop"))
+    crop = capture.get("page_crop")
+    if crop:
+        return _apply_crop(frame, crop)
+    if capture.get("auto_crop", True):
+        return auto_crop_derby_panel(frame)
+    return frame
 
 
 def grab_frame(config: dict) -> np.ndarray:

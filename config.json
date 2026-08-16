@@ -1,10 +1,11 @@
 {
-  "notes": "Use mode brave_cdp for background capture (Ubuntu + Windows). Start Brave with --remote-debugging-port=9222 after closing all Brave windows. Keep zoom at 80%. page_crop is inside the browser tab (not the whole desktop).",
+  "notes": "mode=brave_cdp captures the whole tab, then auto_crop removes sidebar + Matched Bets (like the old game-only screen box). Set page_crop manually to override. mode=screen still uses left/top/width/height on the desktop.",
   "capture": {
     "mode": "brave_cdp",
     "cdp_host": "127.0.0.1",
     "cdp_port": 9222,
     "url_contains": "bpexch.live",
+    "auto_crop": true,
     "page_crop": null,
     "left": 200,
     "top": 120,
