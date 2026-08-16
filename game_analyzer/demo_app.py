@@ -23,6 +23,9 @@ class DemoApp(ctk.CTk):
         self.paths = sorted((root / REAL_DIR_NAME).glob("*.png"))
         self.index = 0
 
+        self.looping = False
+        self.after_id = None
+
         self.preview = ctk.CTkLabel(self, text="")
         self.preview.pack(padx=12, pady=8)
 
@@ -30,6 +33,10 @@ class DemoApp(ctk.CTk):
         nav.pack(fill="x", padx=12)
         ctk.CTkButton(nav, text="Previous", width=120, command=self.prev).pack(side="left", padx=6)
         ctk.CTkButton(nav, text="Next", width=120, command=self.next).pack(side="left", padx=6)
+        ctk.CTkButton(nav, text="Start capture", width=140, command=self.start_loop).pack(
+            side="left", padx=6
+        )
+        ctk.CTkButton(nav, text="Stop", width=80, command=self.stop_loop).pack(side="left", padx=6)
         self.file_label = ctk.CTkLabel(nav, text="", font=("Consolas", 14))
         self.file_label.pack(side="left", padx=12)
 
@@ -61,9 +68,41 @@ class DemoApp(ctk.CTk):
         self.index = (self.index + 1) % len(self.paths)
         self.show()
 
+    def start_loop(self) -> None:
+        if self.looping:
+            return
+        region = self.config_data["capture"]
+        wait = float(region.get("delay_seconds", 5))
+        every = float(region.get("interval_seconds", 30))
+        self.looping = True
+        self.status.configure(
+            text=f"Click Brave now. First shot in {wait:.0f}s, then every {every:.0f}s. Stop to end."
+        )
+        self.after_id = self.after(int(wait * 1000), self._loop_tick)
+
+    def stop_loop(self) -> None:
+        self.looping = False
+        if self.after_id is not None:
+            self.after_cancel(self.after_id)
+            self.after_id = None
+        self.status.configure(text="Capture stopped.")
+
+    def _loop_tick(self) -> None:
+        if not self.looping:
+            return
+        from game_analyzer.live import capture_once
+
+        path, frame, _result = capture_once(self.config_data)
+        self.show_frame(frame, path.name)
+        every = float(self.config_data["capture"].get("interval_seconds", 30))
+        self.after_id = self.after(int(every * 1000), self._loop_tick)
+
     def show(self) -> None:
         path = self.paths[self.index]
         frame = read_image(path)
+        self.show_frame(frame, f"{self.index + 1}/{len(self.paths)}  {path.name}")
+
+    def show_frame(self, frame, label: str) -> None:
         result = extract_real(frame, self.config_data)
         rgb = frame[:, :, ::-1]
         overlay = draw_table_overlay(rgb, self.config_data, result)
@@ -74,10 +113,10 @@ class DemoApp(ctk.CTk):
 
         winner = result.winner_suit.value if result.winner_suit else "none"
         line = (
-            f"{path.name}  state={result.race_state.value}  "
+            f"{label}  state={result.race_state.value}  "
             f"winner={winner}  confident={result.confident}  [{result.notes}]"
         )
-        self.file_label.configure(text=f"{self.index + 1}/{len(self.paths)}  {path.name}")
+        self.file_label.configure(text=label)
         self.status.configure(text=line)
         self.log.insert("end", line + "\n")
         self.log.see("end")

@@ -1,9 +1,12 @@
 {
+  "notes": "Brave, game at 80% zoom. Capture box is the Derby Race panel only (not sidebar, not Matched Bets). Do not change zoom without re-checking live PNGs.",
   "capture": {
-    "left": 100,
-    "top": 100,
-    "width": 756,
-    "height": 708
+    "left": 200,
+    "top": 120,
+    "width": 773,
+    "height": 620,
+    "delay_seconds": 5,
+    "interval_seconds": 30
   },
   "consensus_frames": 3,
   "match_threshold": 0.75,
