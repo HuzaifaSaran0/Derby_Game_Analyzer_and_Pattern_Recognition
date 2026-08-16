@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image
 
 from game_analyzer.config import crop_box
-from game_analyzer.models import ExtractionResult, HighLow, RaceState, Suit
+from game_analyzer.models import ExtractionResult, HighLow, RaceState, RowScore, Suit
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "templates"
 
@@ -134,3 +134,110 @@ def extract(frame: np.ndarray, config: dict) -> ExtractionResult:
         confident=confident,
         notes=notes,
     )
+
+
+def _longest_bright_band(rgb: np.ndarray, thresh: float = 180) -> tuple[int, int]:
+    """Return (y0, y1) of the brightest tall block — the BACK/LAY table."""
+    h, w, _ = rgb.shape
+    strip = rgb[:, w // 10 : 9 * w // 10]
+    lum = strip.reshape(h, -1).mean(axis=1)
+    best = (0, 0)
+    start = None
+    for y, bright in enumerate(lum > thresh):
+        if bright and start is None:
+            start = y
+        elif not bright and start is not None:
+            if y - start > best[1] - best[0]:
+                best = (start, y)
+            start = None
+    if start is not None and h - start > best[1] - best[0]:
+        best = (start, h)
+    return best
+
+
+def _table_rows(rgb: np.ndarray) -> list[tuple[int, int, int, int]]:
+    """Four (left, top, width, height) boxes: Spades, Hearts, Clubs, Diamonds."""
+    h, w, _ = rgb.shape
+    y0, y1 = _longest_bright_band(rgb)
+    if y1 - y0 < 80:
+        return []
+    left = w // 10
+    width = 8 * w // 10
+    header = int((y1 - y0) * 0.14)
+    body0 = y0 + header
+    row_h = (y1 - body0) // 4
+    return [(left, body0 + i * row_h, width, row_h) for i in range(4)]
+
+
+def extract_real(frame_bgr: np.ndarray, config: dict) -> ExtractionResult:
+    """Read the BACK/LAY table on a full bpexch screenshot.
+
+    Finds the white table even if the window size changed, then checks
+    which of the four suit rows is the green WINNER highlight.
+    """
+    rgb = frame_bgr[:, :, ::-1]
+    gap = float(config.get("table", {}).get("winner_green_gap", 30))
+    boxes = _table_rows(rgb)
+    scores: list[RowScore] = []
+
+    if not boxes:
+        return ExtractionResult(
+            race_state=RaceState.UNKNOWN,
+            winner_suit=None,
+            high_low=None,
+            confident=False,
+            notes="table not found",
+        )
+
+    for suit, (left, top, width, height) in zip(Suit, boxes):
+        crop = rgb[top : top + height, left : left + width]
+        r, g, _b = crop.reshape(-1, 3).mean(axis=0)
+        delta = float(g - r)
+        scores.append(
+            RowScore(
+                suit=suit,
+                green_minus_red=delta,
+                is_winner_row=delta > gap,
+                left=left,
+                top=top,
+                width=width,
+                height=height,
+            )
+        )
+
+    winners = [s for s in scores if s.is_winner_row]
+    notes = " ".join(f"{s.suit.value[0]}:{s.green_minus_red:.0f}" for s in scores)
+
+    if len(winners) == 1:
+        return ExtractionResult(
+            race_state=RaceState.FINISHED,
+            winner_suit=winners[0].suit,
+            high_low=None,
+            confident=True,
+            notes=notes,
+            rows=tuple(scores),
+        )
+
+    return ExtractionResult(
+        race_state=RaceState.BETTING,
+        winner_suit=None,
+        high_low=None,
+        confident=False,
+        notes=notes,
+        rows=tuple(scores),
+    )
+
+
+def draw_table_overlay(rgb: np.ndarray, config: dict, result: ExtractionResult) -> np.ndarray:
+    """Copy of the screenshot with the four table rows boxed so you can see the crops."""
+    from PIL import ImageDraw
+
+    _ = config
+    image = Image.fromarray(rgb.copy())
+    draw = ImageDraw.Draw(image)
+    for score in result.rows:
+        box = [score.left, score.top, score.left + score.width, score.top + score.height]
+        color = (0, 220, 80) if score.is_winner_row else (255, 200, 0)
+        draw.rectangle(box, outline=color, width=3)
+        draw.text((score.left + 6, score.top + 4), score.suit.value, fill=color)
+    return np.array(image)
