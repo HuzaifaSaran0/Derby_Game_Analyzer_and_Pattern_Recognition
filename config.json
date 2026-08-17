@@ -12,7 +12,7 @@
     "width": 773,
     "height": 620,
     "delay_seconds": 5,
-    "interval_seconds": 30
+    "interval_seconds": 32
   },
   "draw_overlays": false,
   "consensus_frames": 3,

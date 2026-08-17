@@ -1,9 +1,17 @@
 from pathlib import Path
 
+import cv2
 import pytest
 
-from game_analyzer.cards import read_draw_cards
+from game_analyzer.cards import (
+    HANDICAP_CARD_DIR,
+    _ace_or_four,
+    _score_handicap_ranks,
+    read_draw_cards,
+    read_handicap_cards,
+)
 from game_analyzer.config import load_config
+from game_analyzer.models import Suit
 from game_analyzer.vision import extract_real, read_image
 
 REAL_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "real"
@@ -39,12 +47,63 @@ DRAW_CASES = {
 }
 
 
+HANDICAP_CASES = {
+    "30_AC_6C_3S.png": (
+        ("AS", "2S", "9S"),
+        ("3H", "5H", "QH"),
+        ("3C", "8C", "QC"),
+        ("3D", "5D", "7D"),
+    ),
+    "32_4C_6C_7H.png": (
+        ("2S", "6S", "10S"),
+        ("8H", "9H", "KH"),
+        ("AC", "5C", "KC"),
+        ("6D", "7D", "10D"),
+    ),
+    "36_4D_6D_4S.png": (
+        ("AS", "2S", "10S"),
+        ("4H", "6H", "8H"),
+        ("6C", "QC", "KC"),
+        ("9D", "10D", "KD"),
+    ),
+}
+
+
+def test_handicap_card_goldens():
+    for name, expected in HANDICAP_CASES.items():
+        path = REAL_DIR / name
+        if not path.exists():
+            pytest.skip(f"missing local fixture {name}")
+        assert read_handicap_cards(read_image(path)) == expected, name
+
+
+def test_extract_real_includes_handicap_cards():
+    config = load_config()
+    for name, expected in HANDICAP_CASES.items():
+        path = REAL_DIR / name
+        if not path.exists():
+            pytest.skip(f"missing local fixture {name}")
+        result = extract_real(read_image(path), config)
+        assert result.handicap_cards == expected, name
+
+
 def test_all_draw_card_goldens():
     for name, expected in DRAW_CASES.items():
         cards = read_draw_cards(read_image(REAL_DIR / name))
         assert len(cards) == 3, name
         assert tuple(c.label() for c in cards) == expected, name
         assert all(c.confident for c in cards), name
+
+
+def test_ace_and_four_templates_do_not_mix():
+    for path in sorted(HANDICAP_CARD_DIR.glob("[A4]_*.png")):
+        rank, suit_name = path.stem.split("__", 1)[0].rsplit("_", 1)
+        bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
+        assert bgr is not None, path.name
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        assert _ace_or_four(rgb) == rank, path.name
+        scores = _score_handicap_ranks(rgb, Suit[suit_name])
+        assert scores[0][0] == rank, (path.name, scores[:3])
 
 
 def test_extract_real_includes_draw_cards():

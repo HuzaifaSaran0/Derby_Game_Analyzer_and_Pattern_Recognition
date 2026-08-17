@@ -170,8 +170,8 @@ def _table_rows(rgb: np.ndarray) -> list[tuple[int, int, int, int]]:
 
 
 def extract_real(frame_bgr: np.ndarray, config: dict) -> ExtractionResult:
-    """Read winner row + the 3 move cards on a bpexch screenshot."""
-    from game_analyzer.cards import read_draw_cards
+    """Read winner row + handicap grid + the 3 move cards on a bpexch screenshot."""
+    from game_analyzer.cards import read_draw_cards, read_handicap_cards
 
     rgb = frame_bgr[:, :, ::-1]
     gap = float(config.get("table", {}).get("winner_green_gap", 30))
@@ -179,7 +179,9 @@ def extract_real(frame_bgr: np.ndarray, config: dict) -> ExtractionResult:
     scores: list[RowScore] = []
     draw_reads = read_draw_cards(frame_bgr)
     draw_labels = tuple(c.label() for c in draw_reads)
+    handicap = read_handicap_cards(frame_bgr)
     draw_note = "cards=" + ",".join(draw_labels) if draw_labels else "cards=none"
+    handicap_note = "hc=" + "|".join(",".join(row) for row in handicap) if handicap else "hc=none"
 
     if not boxes:
         return ExtractionResult(
@@ -187,8 +189,9 @@ def extract_real(frame_bgr: np.ndarray, config: dict) -> ExtractionResult:
             winner_suit=None,
             high_low=None,
             confident=False,
-            notes=f"table not found; {draw_note}",
+            notes=f"table not found; {handicap_note}; {draw_note}",
             draw_cards=draw_labels,
+            handicap_cards=handicap,
         )
 
     for suit, (left, top, width, height) in zip(Suit, boxes):
@@ -209,7 +212,7 @@ def extract_real(frame_bgr: np.ndarray, config: dict) -> ExtractionResult:
 
     winners = [s for s in scores if s.is_winner_row]
     notes = " ".join(f"{s.suit.value[0]}:{s.green_minus_red:.0f}" for s in scores)
-    notes = f"{notes} | {draw_note}"
+    notes = f"{notes} | {handicap_note} | {draw_note}"
 
     if len(winners) == 1:
         return ExtractionResult(
@@ -220,6 +223,7 @@ def extract_real(frame_bgr: np.ndarray, config: dict) -> ExtractionResult:
             notes=notes,
             rows=tuple(scores),
             draw_cards=draw_labels,
+            handicap_cards=handicap,
         )
 
     return ExtractionResult(
@@ -230,6 +234,7 @@ def extract_real(frame_bgr: np.ndarray, config: dict) -> ExtractionResult:
         notes=notes,
         rows=tuple(scores),
         draw_cards=draw_labels,
+        handicap_cards=handicap,
     )
 
 

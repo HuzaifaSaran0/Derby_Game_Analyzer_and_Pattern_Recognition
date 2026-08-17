@@ -43,6 +43,7 @@ class ExtractionResult:
     notes: str = ""
     rows: tuple[RowScore, ...] = ()
     draw_cards: tuple[str, ...] = ()
+    handicap_cards: tuple[tuple[str, ...], ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -52,4 +53,5 @@ class ExtractionResult:
             "confident": self.confident,
             "notes": self.notes,
             "draw_cards": list(self.draw_cards),
+            "handicap_cards": [list(row) for row in self.handicap_cards],
         }

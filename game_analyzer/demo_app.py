@@ -40,7 +40,8 @@ class DemoApp(ctk.CTk):
         grid.pack(fill="x", padx=12, pady=(0, 10))
         self.result_state = self._result_row(grid, 0, "Race state")
         self.result_winner = self._result_row(grid, 1, "Winner")
-        self.result_cards = self._result_row(grid, 2, "Draw cards")
+        self.result_handicap = self._result_row(grid, 2, "Handicap")
+        self.result_cards = self._result_row(grid, 3, "Draw cards")
 
         nav = ctk.CTkFrame(self)
         nav.pack(fill="x", padx=12)
@@ -60,7 +61,7 @@ class DemoApp(ctk.CTk):
         self.log.pack(fill="both", expand=True, padx=12, pady=(0, 12))
         self.log.insert(
             "end",
-            "Reads winner row (green) + the 3 move cards (rank+suit).\n"
+            "Reads winner row (green) + handicap cards + the 3 move cards.\n"
             "Fetched values appear in the panel under the screenshot.\n"
             "Saved live images are clean unless draw_overlays=true.\n\n",
         )
@@ -80,6 +81,10 @@ class DemoApp(ctk.CTk):
 
     def _set_results(self, result: ExtractionResult) -> None:
         winner = result.winner_suit.value.title() if result.winner_suit else "none yet"
+        if result.handicap_cards:
+            handicap = "  ·  ".join(", ".join(row) for row in result.handicap_cards)
+        else:
+            handicap = "none visible"
         if result.draw_cards:
             cards = "  ·  ".join(result.draw_cards)
         else:
@@ -92,6 +97,7 @@ class DemoApp(ctk.CTk):
         }.get(result.race_state.value, result.race_state.value)
         self.result_state.configure(text=state)
         self.result_winner.configure(text=winner)
+        self.result_handicap.configure(text=handicap)
         self.result_cards.configure(text=cards)
 
     def prev(self) -> None:
@@ -164,10 +170,11 @@ class DemoApp(ctk.CTk):
         self._set_results(result)
 
         winner = result.winner_suit.value if result.winner_suit else "none"
+        handicap = "|".join(",".join(row) for row in result.handicap_cards) if result.handicap_cards else "-"
         cards = ",".join(result.draw_cards) if result.draw_cards else "-"
         line = (
             f"{label}  state={result.race_state.value}  "
-            f"winner={winner}  draw=[{cards}]  [{result.notes}]"
+            f"winner={winner}  handicap=[{handicap}]  draw=[{cards}]  [{result.notes}]"
         )
         self.file_label.configure(text=label)
         self.status.configure(text=line)
