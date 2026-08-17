@@ -170,15 +170,16 @@ def _table_rows(rgb: np.ndarray) -> list[tuple[int, int, int, int]]:
 
 
 def extract_real(frame_bgr: np.ndarray, config: dict) -> ExtractionResult:
-    """Read the BACK/LAY table on a full bpexch screenshot.
+    """Read winner row + the 3 move cards on a bpexch screenshot."""
+    from game_analyzer.cards import read_draw_cards
 
-    Finds the white table even if the window size changed, then checks
-    which of the four suit rows is the green WINNER highlight.
-    """
     rgb = frame_bgr[:, :, ::-1]
     gap = float(config.get("table", {}).get("winner_green_gap", 30))
     boxes = _table_rows(rgb)
     scores: list[RowScore] = []
+    draw_reads = read_draw_cards(frame_bgr)
+    draw_labels = tuple(c.label() for c in draw_reads)
+    draw_note = "cards=" + ",".join(draw_labels) if draw_labels else "cards=none"
 
     if not boxes:
         return ExtractionResult(
@@ -186,7 +187,8 @@ def extract_real(frame_bgr: np.ndarray, config: dict) -> ExtractionResult:
             winner_suit=None,
             high_low=None,
             confident=False,
-            notes="table not found",
+            notes=f"table not found; {draw_note}",
+            draw_cards=draw_labels,
         )
 
     for suit, (left, top, width, height) in zip(Suit, boxes):
@@ -207,6 +209,7 @@ def extract_real(frame_bgr: np.ndarray, config: dict) -> ExtractionResult:
 
     winners = [s for s in scores if s.is_winner_row]
     notes = " ".join(f"{s.suit.value[0]}:{s.green_minus_red:.0f}" for s in scores)
+    notes = f"{notes} | {draw_note}"
 
     if len(winners) == 1:
         return ExtractionResult(
@@ -216,6 +219,7 @@ def extract_real(frame_bgr: np.ndarray, config: dict) -> ExtractionResult:
             confident=True,
             notes=notes,
             rows=tuple(scores),
+            draw_cards=draw_labels,
         )
 
     return ExtractionResult(
@@ -225,6 +229,7 @@ def extract_real(frame_bgr: np.ndarray, config: dict) -> ExtractionResult:
         confident=False,
         notes=notes,
         rows=tuple(scores),
+        draw_cards=draw_labels,
     )
 
 

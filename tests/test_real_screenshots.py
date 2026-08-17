@@ -1,10 +1,17 @@
 from pathlib import Path
 
+import pytest
+
 from game_analyzer.config import load_config
 from game_analyzer.models import RaceState, Suit
 from game_analyzer.vision import extract_real, read_image
 
 REAL_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "real"
+
+pytestmark = pytest.mark.skipif(
+    not any(REAL_DIR.glob("*.png")),
+    reason="fixtures/real screenshots are local-only",
+)
 
 
 def test_winner_frame_is_clubs():

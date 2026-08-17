@@ -14,6 +14,7 @@
     "delay_seconds": 5,
     "interval_seconds": 30
   },
+  "draw_overlays": false,
   "consensus_frames": 3,
   "match_threshold": 0.75,
   "rois": {

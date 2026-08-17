@@ -8,4 +8,12 @@ dist/
 build/
 *.spec
 .DS_Store
+
+# Full game screenshots — keep locally, do not publish
 fixtures/live/
+fixtures/real/
+
+# Extra card crops that are not the unique draw-card bank
+fixtures/templates/cards/indexes/handicap/
+fixtures/templates/cards/ranks/
+fixtures/templates/cards/suits/

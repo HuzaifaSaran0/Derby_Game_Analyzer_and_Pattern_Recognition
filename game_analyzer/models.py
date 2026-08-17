@@ -42,6 +42,7 @@ class ExtractionResult:
     confident: bool
     notes: str = ""
     rows: tuple[RowScore, ...] = ()
+    draw_cards: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -50,4 +51,5 @@ class ExtractionResult:
             "high_low": self.high_low.value if self.high_low else None,
             "confident": self.confident,
             "notes": self.notes,
+            "draw_cards": list(self.draw_cards),
         }

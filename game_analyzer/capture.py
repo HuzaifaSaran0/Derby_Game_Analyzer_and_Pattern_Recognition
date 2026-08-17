@@ -183,15 +183,39 @@ def auto_crop_derby_panel(frame: np.ndarray) -> np.ndarray:
     white = (lum > 220).mean(axis=0)
     dark = (lum < 80).mean(axis=0)
 
-    # Left = end of dark sidebar (+ thin white gutter). Do not skip the dark track.
+    # Left = end of dark sidebar (+ thin white gutter).
+    # Do not stop on a single bright icon column inside the nav — that used to
+    # leave the whole sidebar in when CDP returned a wider tab.
     left = 0
-    x = 0
-    while x < w // 3 and dark[x] > 0.55:
-        x += 1
-    while x < w // 3 and white[x] > 0.5:
-        x += 1
-    # Pull back so Handicap Cards / suit labels are not clipped.
-    left = max(0, x - 18)
+    if dark[:15].mean() >= 0.35:
+        gutter = None
+        for x in range(40, w // 3):
+            if white[x] <= 0.85:
+                continue
+            run = 0
+            while x + run < w // 3 and white[x + run] > 0.85:
+                run += 1
+            if run >= 3 and dark[max(0, x - 30) : x].mean() > 0.45:
+                gutter = x + run
+                break
+        if gutter is not None:
+            left = gutter
+        else:
+            # Fallback: long dark run, then skip any white gutter.
+            run = 0
+            end = 0
+            for x in range(w // 3):
+                if dark[x] > 0.55:
+                    run += 1
+                    end = x
+                else:
+                    if run >= 50:
+                        x2 = end + 1
+                        while x2 < w // 3 and white[x2] > 0.5:
+                            x2 += 1
+                        left = x2
+                        break
+                    run = 0
 
     # Right = before the tall white Matched Bets panel.
     right = w

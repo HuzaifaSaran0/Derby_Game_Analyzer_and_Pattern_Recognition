@@ -28,10 +28,11 @@ def capture_once(config: dict | None = None):
     LIVE_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%H-%M-%S-%f")[:15]
     raw_path = LIVE_DIR / f"live_{stamp}.png"
-    overlay_path = LIVE_DIR / f"live_{stamp}_boxes.png"
     write_image(raw_path, frame)
-    overlay = draw_table_overlay(frame[:, :, ::-1], config, result)
-    write_image(overlay_path, overlay[:, :, ::-1])
+    if config.get("draw_overlays", False):
+        overlay_path = LIVE_DIR / f"live_{stamp}_boxes.png"
+        overlay = draw_table_overlay(frame[:, :, ::-1], config, result)
+        write_image(overlay_path, overlay[:, :, ::-1])
     return raw_path, frame, result
 
 
@@ -82,9 +83,10 @@ def print_tabs() -> None:
 def _print_capture(saved) -> None:
     raw_path, _frame, result = saved
     winner = result.winner_suit.value if result.winner_suit else "none"
+    cards = ",".join(result.draw_cards) if result.draw_cards else "-"
     print(
         f"{raw_path.name}  state={result.race_state.value}  winner={winner}  "
-        f"[{result.notes}]"
+        f"draw=[{cards}]  [{result.notes}]"
     )
 
 
