@@ -12,7 +12,9 @@
     "width": 773,
     "height": 620,
     "delay_seconds": 5,
-    "interval_seconds": 32
+    "round_seconds": 32,
+    "cards_appear_after": 10,
+    "start_poll_seconds": 3
   },
   "draw_overlays": false,
   "consensus_frames": 3,

@@ -103,7 +103,7 @@ def _ws_send_text(sock: socket.socket, text: str) -> None:
     sock.sendall(header + masked)
 
 
-def _cdp_screenshot_png(ws_url: str) -> bytes:
+def _cdp_connect(ws_url: str) -> socket.socket:
     parsed = urlparse(ws_url)
     host = parsed.hostname or "127.0.0.1"
     port = parsed.port or 9222
@@ -122,38 +122,75 @@ def _cdp_screenshot_png(ws_url: str) -> bytes:
         "\r\n"
     )
     sock = socket.create_connection((host, port), timeout=10)
-    try:
-        sock.sendall(req.encode("ascii"))
-        response = b""
-        while b"\r\n\r\n" not in response:
-            chunk = sock.recv(4096)
-            if not chunk:
-                raise RuntimeError("CDP websocket handshake failed")
-            response += chunk
-        if b"101" not in response.split(b"\r\n", 1)[0]:
-            raise RuntimeError(f"CDP websocket handshake rejected: {response[:200]!r}")
+    sock.sendall(req.encode("ascii"))
+    response = b""
+    while b"\r\n\r\n" not in response:
+        chunk = sock.recv(4096)
+        if not chunk:
+            sock.close()
+            raise RuntimeError("CDP websocket handshake failed")
+        response += chunk
+    if b"101" not in response.split(b"\r\n", 1)[0]:
+        sock.close()
+        raise RuntimeError(f"CDP websocket handshake rejected: {response[:200]!r}")
+    return sock
 
+
+def _cdp_call(ws_url: str, method: str, params: dict | None = None) -> dict:
+    sock = _cdp_connect(ws_url)
+    try:
         msg_id = 1
-        _ws_send_text(
-            sock,
-            json.dumps(
-                {
-                    "id": msg_id,
-                    "method": "Page.captureScreenshot",
-                    "params": {"format": "png", "fromSurface": True},
-                }
-            ),
-        )
+        payload = {"id": msg_id, "method": method}
+        if params:
+            payload["params"] = params
+        _ws_send_text(sock, json.dumps(payload))
         while True:
-            payload = _ws_recv_frame(sock)
-            data = json.loads(payload.decode("utf-8"))
+            data = json.loads(_ws_recv_frame(sock).decode("utf-8"))
             if data.get("id") != msg_id:
                 continue
             if "error" in data:
-                raise RuntimeError(f"CDP screenshot failed: {data['error']}")
-            return base64.b64decode(data["result"]["data"])
+                raise RuntimeError(f"CDP {method} failed: {data['error']}")
+            return data.get("result") or {}
     finally:
         sock.close()
+
+
+def _cdp_screenshot_png(ws_url: str) -> bytes:
+    result = _cdp_call(ws_url, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
+    return base64.b64decode(result["data"])
+
+
+_GAME_ID_JS = r"""
+(() => {
+  const text = document.body ? (document.body.innerText || '') : '';
+  const match = text.match(/Game ID[:\s]+(\d{5,})/i);
+  return match ? match[1] : '';
+})()
+"""
+
+
+def read_page_game_id(capture: dict) -> str | None:
+    """Read the on-page Game ID via CDP. No screenshot. None if not Brave/CDP or not found."""
+    mode = str(capture.get("mode", "screen")).lower()
+    if mode not in {"brave_cdp", "brave", "cdp"}:
+        return None
+    host = str(capture.get("cdp_host", "127.0.0.1"))
+    port = int(capture.get("cdp_port", 9222))
+    needle = str(capture.get("url_contains", "bpexch.live"))
+    try:
+        tabs = list_brave_tabs(host, port)
+        tab = _pick_game_tab(tabs, needle)
+        result = _cdp_call(
+            tab["webSocketDebuggerUrl"],
+            "Runtime.evaluate",
+            {"expression": _GAME_ID_JS, "returnByValue": True},
+        )
+    except Exception:
+        return None
+    value = ((result.get("result") or {}).get("value")) if result else None
+    if isinstance(value, str) and value.isdigit():
+        return value
+    return None
 
 
 def _png_bytes_to_bgr(png_bytes: bytes) -> np.ndarray:

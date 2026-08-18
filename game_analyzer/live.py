@@ -12,28 +12,64 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from game_analyzer.capture import grab_frame, list_brave_tabs, list_monitors
+from game_analyzer.capture import grab_frame, list_brave_tabs, list_monitors, read_page_game_id
 from game_analyzer.config import load_config
+from game_analyzer.session import GameSessionTracker, RoundTiming, SessionDecision
 from game_analyzer.vision import draw_table_overlay, extract_real, write_image
 
 ROOT = Path(__file__).resolve().parent.parent
 LIVE_DIR = ROOT / "fixtures" / "live"
+SESSION_TRACKER = GameSessionTracker()
+_LAST_DECISION: SessionDecision | None = None
+_LAST_FRAME = None
+_LAST_PATH: Path | None = None
+_LAST_RESULT = None
+
+
+def _timing_from_config(config: dict) -> RoundTiming:
+    cap = config.get("capture") or {}
+    return RoundTiming(
+        round_seconds=float(cap.get("round_seconds", 32)),
+        cards_appear_after=float(cap.get("cards_appear_after", 10)),
+        start_poll_seconds=float(cap.get("start_poll_seconds", 3)),
+    )
 
 
 def capture_once(config: dict | None = None):
     """Grab via screen box or Brave CDP, save PNG + overlay, return paths/result."""
+    global _LAST_DECISION, _LAST_FRAME, _LAST_PATH, _LAST_RESULT
     config = config or load_config()
+    SESSION_TRACKER.timing = _timing_from_config(config)
+    capture = config["capture"]
+    game_id = read_page_game_id(capture)
+
+    if (
+        _LAST_DECISION
+        and _LAST_DECISION.peek_id_only
+        and game_id
+        and game_id == _LAST_DECISION.game_id
+    ):
+        return _LAST_PATH, _LAST_FRAME, _LAST_RESULT, _LAST_DECISION
+
     frame = grab_frame(config)
     result = extract_real(frame, config)
-    LIVE_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%H-%M-%S-%f")[:15]
-    raw_path = LIVE_DIR / f"live_{stamp}.png"
-    write_image(raw_path, frame)
-    if config.get("draw_overlays", False):
-        overlay_path = LIVE_DIR / f"live_{stamp}_boxes.png"
-        overlay = draw_table_overlay(frame[:, :, ::-1], config, result)
-        write_image(overlay_path, overlay[:, :, ::-1])
-    return raw_path, frame, result
+    captured_at = datetime.now()
+    decision = SESSION_TRACKER.observe(result, captured_at, game_id=game_id)
+    folder = LIVE_DIR / decision.folder_name()
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = decision.file_stem(captured_at)
+    raw_path = folder / f"{stem}.png"
+    if decision.should_save:
+        write_image(raw_path, frame)
+        if config.get("draw_overlays", False):
+            overlay_path = folder / f"{stem}_boxes.png"
+            overlay = draw_table_overlay(frame[:, :, ::-1], config, result)
+            write_image(overlay_path, overlay[:, :, ::-1])
+    _LAST_DECISION = decision
+    _LAST_FRAME = frame
+    _LAST_PATH = raw_path
+    _LAST_RESULT = result
+    return raw_path, frame, result, decision
 
 
 def grab_and_analyze(delay: float | None = None) -> None:
@@ -59,12 +95,12 @@ def loop_forever(delay: float | None = None, interval: float | None = None) -> N
     config = load_config()
     capture = config["capture"]
     wait = float(delay if delay is not None else capture.get("delay_seconds", 5))
-    every = float(interval if interval is not None else capture.get("interval_seconds", 30))
-    print(f"Mode={capture.get('mode', 'screen')}  first in {wait:.0f}s, every {every:.0f}s. Ctrl+C to stop.")
+    print(f"Mode={capture.get('mode', 'screen')}  first in {wait:.0f}s, then on the round clock. Ctrl+C to stop.")
     time.sleep(wait)
     while True:
-        _print_capture(capture_once(config))
-        time.sleep(every)
+        saved = capture_once(config)
+        _print_capture(saved)
+        time.sleep(saved[3].next_wait_seconds)
 
 
 def print_tabs() -> None:
@@ -81,12 +117,13 @@ def print_tabs() -> None:
 
 
 def _print_capture(saved) -> None:
-    raw_path, _frame, result = saved
-    winner = result.winner_suit.value if result.winner_suit else "none"
-    cards = ",".join(result.draw_cards) if result.draw_cards else "-"
+    raw_path, _frame, result, decision = saved
+    winner = result.winner_suit.value if result and result.winner_suit else "none"
+    cards = ",".join(result.draw_cards) if result and result.draw_cards else "-"
     print(
-        f"{raw_path.name}  state={result.race_state.value}  winner={winner}  "
-        f"draw=[{cards}]  [{result.notes}]"
+        f"{raw_path.relative_to(LIVE_DIR) if raw_path else '-'}  phase={decision.phase.value}  "
+        f"{decision.reason}  game={decision.game_id or '-'}  next={decision.next_wait_seconds:.0f}s  "
+        f"winner={winner}  draw=[{cards}]  [{result.notes if result else ''}]"
     )
 
 

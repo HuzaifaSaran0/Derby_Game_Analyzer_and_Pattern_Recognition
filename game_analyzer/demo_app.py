@@ -32,6 +32,8 @@ class DemoApp(ctk.CTk):
 
         self.looping = False
         self.after_id = None
+        self.last_session_text = "offline screenshot"
+        self.last_table_cards = None
 
         nav = ctk.CTkFrame(self)
         nav.pack(fill="x", padx=12, pady=(8, 4))
@@ -88,6 +90,8 @@ class DemoApp(ctk.CTk):
         left.pack(fill="x", padx=12, pady=(0, 10))
         self.result_state = self._result_row(left, 0, "Race state")
         self.result_winner = self._result_row(left, 1, "Winner")
+        self.result_phase = self._result_row(left, 2, "Game phase")
+        self.result_session = self._result_row(left, 3, "Session")
 
         self.status = ctk.CTkLabel(self, text="", font=("Consolas", 14), justify="left")
         self.status.pack(padx=12, pady=6, anchor="w")
@@ -114,7 +118,7 @@ class DemoApp(ctk.CTk):
         parent.grid_columnconfigure(1, weight=1)
         return value
 
-    def _set_results(self, result: ExtractionResult) -> None:
+    def _set_results(self, result: ExtractionResult, table_cards=None) -> None:
         winner = result.winner_suit.value.title() if result.winner_suit else "none yet"
         state = {
             "FINISHED": "Race finished (winner highlighted)",
@@ -124,14 +128,24 @@ class DemoApp(ctk.CTk):
         }.get(result.race_state.value, result.race_state.value)
         self.result_state.configure(text=state)
         self.result_winner.configure(text=winner)
-        self._render_card_table(result)
+        phase = result.game_phase()
+        phase_text = {
+            "START": "Start — no handicap cards yet",
+            "DEALT": "Start — handicap dealt, no draws yet",
+            "IN_PLAY": "In between — handicap + draw cards, no results",
+            "FINISHED": "End — winner / results showing",
+        }.get(phase.value, phase.value)
+        self.result_phase.configure(text=phase_text)
+        self.result_session.configure(text=self.last_session_text)
+        self._render_card_table(result, table_cards)
 
-    def _render_card_table(self, result: ExtractionResult) -> None:
+    def _render_card_table(self, result: ExtractionResult, table_cards=None) -> None:
         for frame in self.card_row_frames.values():
             for child in frame.winfo_children():
                 child.destroy()
 
-        for suit_name, cards in result.combined_suit_cards():
+        rows = table_cards if table_cards else result.combined_suit_cards()
+        for suit_name, cards in rows:
             holder = self.card_row_frames[suit_name]
             if not cards:
                 ctk.CTkLabel(holder, text="—", font=("Consolas", 15)).pack(side="left", padx=4)
@@ -189,18 +203,18 @@ class DemoApp(ctk.CTk):
             return
         region = self.config_data["capture"]
         wait = float(region.get("delay_seconds", 5))
-        every = float(region.get("interval_seconds", 30))
         self.looping = True
         mode = str(region.get("mode", "screen"))
         if mode.lower() in {"brave_cdp", "brave", "cdp"}:
             hint = (
-                f"Brave CDP mode: UI can stay in front. First shot in {wait:.0f}s, "
-                f"then every {every:.0f}s."
+                f"Brave CDP mode: first look in {wait:.0f}s, then one shot at card-reveal "
+                f"(+{region.get('cards_appear_after', 10):.0f}s) and every "
+                f"{region.get('round_seconds', 32):.0f}s round."
             )
         else:
             hint = (
-                f"Screen mode: click Brave so the game is visible. "
-                f"First shot in {wait:.0f}s, then every {every:.0f}s."
+                f"Screen mode: click Brave so the game is visible. First look in {wait:.0f}s, "
+                f"then on the 10s / 32s round clock."
             )
         self.status.configure(text=hint)
         self.after_id = self.after(int(wait * 1000), self._loop_tick)
@@ -217,17 +231,28 @@ class DemoApp(ctk.CTk):
             return
         from game_analyzer.live import capture_once
 
-        path, frame, _result = capture_once(self.config_data)
-        self.show_frame(frame, path.name)
-        every = float(self.config_data["capture"].get("interval_seconds", 30))
-        self.after_id = self.after(int(every * 1000), self._loop_tick)
+        path, frame, _result, decision = capture_once(self.config_data)
+        if decision.recording:
+            gid = decision.game_id or decision.session_id
+            self.last_session_text = f"{gid}  #{decision.seq}  next {decision.next_wait_seconds:.0f}s"
+        else:
+            self.last_session_text = (
+                f"waiting for next game start  (id {decision.game_id or '?'})"
+            )
+        if frame is not None:
+            self.last_table_cards = decision.table_cards
+            rel = f"{path.parent.name}/{path.name}" if path else decision.reason
+            self.show_frame(frame, rel, table_cards=decision.table_cards)
+        else:
+            self.result_session.configure(text=self.last_session_text)
+        self.after_id = self.after(int(decision.next_wait_seconds * 1000), self._loop_tick)
 
     def show(self) -> None:
         path = self.paths[self.index]
         frame = read_image(path)
         self.show_frame(frame, f"{self.index + 1}/{len(self.paths)}  {path.name}")
 
-    def show_frame(self, frame, label: str) -> None:
+    def show_frame(self, frame, label: str, table_cards=None) -> None:
         result = extract_real(frame, self.config_data)
         rgb = frame[:, :, ::-1]
         if self.config_data.get("draw_overlays", False):
@@ -239,7 +264,7 @@ class DemoApp(ctk.CTk):
         self.preview.configure(image=photo)
         self.preview.image = photo
 
-        self._set_results(result)
+        self._set_results(result, table_cards)
 
         winner = result.winner_suit.value if result.winner_suit else "none"
         handicap = "|".join(",".join(row) for row in result.handicap_cards) if result.handicap_cards else "-"
