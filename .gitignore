@@ -8,6 +8,9 @@ dist/
 build/
 *.spec
 .DS_Store
+data/*.sqlite
+data/*.sqlite-wal
+data/*.sqlite-shm
 
 # Full game screenshots — keep locally, do not publish
 fixtures/live/

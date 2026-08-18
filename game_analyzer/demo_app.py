@@ -43,6 +43,10 @@ class DemoApp(ctk.CTk):
             side="left", padx=6
         )
         ctk.CTkButton(nav, text="Stop", width=80, command=self.stop_loop).pack(side="left", padx=6)
+        self.history_win = None
+        ctk.CTkButton(nav, text="History", width=100, command=self.open_history).pack(
+            side="right", padx=6
+        )
         self.file_label = ctk.CTkLabel(nav, text="", font=("Consolas", 14))
         self.file_label.pack(side="left", padx=12)
 
@@ -185,6 +189,17 @@ class DemoApp(ctk.CTk):
             text_color=style["color"],
             font=("Segoe UI Symbol", 18, "bold"),
         ).pack(expand=True)
+
+    def open_history(self) -> None:
+        from game_analyzer.history import HistoryWindow
+
+        if self.history_win is not None and self.history_win.winfo_exists():
+            self.history_win.reload()
+            self.history_win.lift()
+            self.history_win.focus()
+            return
+        self.history_win = HistoryWindow(self)
+        self.history_win.focus()
 
     def prev(self) -> None:
         if not self.paths:

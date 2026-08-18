@@ -15,11 +15,13 @@ from pathlib import Path
 from game_analyzer.capture import grab_frame, list_brave_tabs, list_monitors, read_page_game_id
 from game_analyzer.config import load_config
 from game_analyzer.session import GameSessionTracker, RoundTiming, SessionDecision
+from game_analyzer.store import GameStore
 from game_analyzer.vision import draw_table_overlay, extract_real, write_image
 
 ROOT = Path(__file__).resolve().parent.parent
 LIVE_DIR = ROOT / "fixtures" / "live"
 SESSION_TRACKER = GameSessionTracker()
+GAME_STORE = GameStore()
 _LAST_DECISION: SessionDecision | None = None
 _LAST_FRAME = None
 _LAST_PATH: Path | None = None
@@ -65,6 +67,7 @@ def capture_once(config: dict | None = None):
             overlay_path = folder / f"{stem}_boxes.png"
             overlay = draw_table_overlay(frame[:, :, ::-1], config, result)
             write_image(overlay_path, overlay[:, :, ::-1])
+        GAME_STORE.record(decision, result, raw_path, captured_at)
     _LAST_DECISION = decision
     _LAST_FRAME = frame
     _LAST_PATH = raw_path
