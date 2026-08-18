@@ -55,3 +55,28 @@ class ExtractionResult:
             "draw_cards": list(self.draw_cards),
             "handicap_cards": [list(row) for row in self.handicap_cards],
         }
+
+    def combined_suit_cards(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        """Merge starting handicap rows with newly drawn cards by suit."""
+        rows = {
+            Suit.SPADES: list(self.handicap_cards[0]) if len(self.handicap_cards) > 0 else [],
+            Suit.HEARTS: list(self.handicap_cards[1]) if len(self.handicap_cards) > 1 else [],
+            Suit.CLUBS: list(self.handicap_cards[2]) if len(self.handicap_cards) > 2 else [],
+            Suit.DIAMONDS: list(self.handicap_cards[3]) if len(self.handicap_cards) > 3 else [],
+        }
+        for card in self.draw_cards:
+            if len(card) < 2:
+                continue
+            suit_letter = card[-1]
+            for suit in Suit:
+                if suit.value[0] == suit_letter:
+                    rows[suit].append(card)
+                    break
+        return tuple((suit.value.title(), tuple(rows[suit])) for suit in Suit)
+
+    def combined_suit_cards_text(self) -> str:
+        lines = []
+        for suit_name, cards in self.combined_suit_cards():
+            text = ", ".join(cards) if cards else "-"
+            lines.append(f"{suit_name}: {text}")
+        return "\n".join(lines)
