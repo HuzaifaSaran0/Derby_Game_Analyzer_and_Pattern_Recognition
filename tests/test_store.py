@@ -53,6 +53,10 @@ def test_store_saves_game_frames_and_winner(tmp_path: Path):
     )
 
     assert store.list_game_ids() == ["100"]
+    listed = store.list_games()
+    assert listed[0]["game_id"] == "100"
+    assert listed[0]["shot_count"] == 2
+    assert listed[0]["winner_suit"] == "CLUBS"
     game = store.get_game("100", root=tmp_path)
     assert game is not None
     assert game.winner_suit == "CLUBS"

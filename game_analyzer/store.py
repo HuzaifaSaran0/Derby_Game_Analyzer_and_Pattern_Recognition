@@ -65,16 +65,20 @@ def _dumps(value) -> str:
 
 
 class GameStore:
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(self, path: Path | None = None, root: Path | None = None) -> None:
         self.path = path or DEFAULT_DB
+        self.root = root or ROOT
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as con:
             con.executescript(_SCHEMA)
 
-    def _connect(self) -> sqlite3.Connection:
-        con = sqlite3.connect(self.path)
+    def _connect(self, *, autocommit: bool = False) -> sqlite3.Connection:
+        con = sqlite3.connect(str(self.path), timeout=10)
         con.row_factory = sqlite3.Row
+        if autocommit:
+            con.isolation_level = None
         con.execute("PRAGMA journal_mode=WAL;")
+        con.execute("PRAGMA busy_timeout=5000;")
         con.execute("PRAGMA foreign_keys=ON;")
         return con
 
@@ -91,7 +95,7 @@ class GameStore:
         game_id = decision.game_id or decision.session_id
         if not game_id:
             return
-        root = root or ROOT
+        root = root or self.root
         rel = screenshot
         try:
             rel = screenshot.resolve().relative_to(root.resolve())
@@ -150,16 +154,28 @@ class GameStore:
                 ),
             )
 
+    def list_games(self) -> list[dict]:
+        with self._connect(autocommit=True) as con:
+            rows = con.execute(
+                """
+                SELECT game_id, started_at, finished_at, winner_suit,
+                       (SELECT COUNT(*) FROM frames f WHERE f.game_id = games.game_id) AS shot_count
+                FROM games
+                ORDER BY id DESC
+                """
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def list_game_ids(self) -> list[str]:
-        with self._connect() as con:
+        with self._connect(autocommit=True) as con:
             rows = con.execute(
                 "SELECT game_id FROM games ORDER BY id ASC"
             ).fetchall()
         return [r["game_id"] for r in rows]
 
     def get_game(self, game_id: str, root: Path | None = None) -> StoredGame | None:
-        root = root or ROOT
-        with self._connect() as con:
+        root = root or self.root
+        with self._connect(autocommit=True) as con:
             game = con.execute(
                 "SELECT * FROM games WHERE game_id = ?", (game_id,)
             ).fetchone()
