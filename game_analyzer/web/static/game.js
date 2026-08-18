@@ -263,7 +263,7 @@
 
   live.start(async function () {
     try {
-      const data = await live.get("/api/game/" + encodeURIComponent(gameId));
+      const data = await live.get("/game/" + encodeURIComponent(gameId) + "/live");
       const sig = JSON.stringify({
         winner: data.winner,
         finished_at: data.finished_at,

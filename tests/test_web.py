@@ -118,6 +118,10 @@ def test_api_games_and_game_payload(tmp_path: Path):
     assert ids == ["99", "100"]
     payload = client.get("/api/game/100").json()
     assert payload["winner"] == "Clubs"
+    assert client.get("/game/100/live").json()["game_id"] == "100"
+    assert client.get("/games.json").json()["games"][0]["game_id"] in {"99", "100"}
+    json_from_html = client.get("/game/100", headers={"Accept": "application/json"}).json()
+    assert json_from_html["winner"] == "Clubs"
     assert payload["frames"][0]["seq"] == 1
     assert payload["frames"][0]["url"].startswith("/shot/100/1")
     assert payload["table"][0]["name"] == "Spades"

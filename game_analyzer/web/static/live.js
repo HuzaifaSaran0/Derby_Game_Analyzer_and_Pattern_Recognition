@@ -15,6 +15,10 @@ window.gameAnalyzerLive = {
     if (!response.ok) {
       throw new Error("HTTP " + response.status);
     }
+    const type = response.headers.get("content-type") || "";
+    if (type.indexOf("application/json") < 0) {
+      throw new Error("not json");
+    }
     return response.json();
   },
   stamp(ok, detail) {

@@ -38,7 +38,7 @@
 
   live.start(async function () {
     try {
-      const data = await live.get("/api/games");
+      const data = await live.get("/games.json");
       const games = data.games || [];
       const sig = JSON.stringify(games);
       live.stamp(true, games.length + " game" + (games.length === 1 ? "" : "s"));

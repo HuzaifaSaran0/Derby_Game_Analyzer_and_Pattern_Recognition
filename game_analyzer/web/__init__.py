@@ -89,13 +89,15 @@ def create_app(store: GameStore | None = None) -> FastAPI:
     store = store or GameStore()
     app = FastAPI(title="Game Analyzer")
     templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
-    app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
 
-    @app.middleware("http")
-    async def disable_cache(request: Request, call_next):
-        response = await call_next(request)
-        response.headers.update(NO_CACHE)
-        return response
+    def live_games() -> JSONResponse:
+        return JSONResponse({"games": store.list_games()}, headers=NO_CACHE)
+
+    def live_game(game_id: str) -> JSONResponse:
+        payload = _game_payload(store, game_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Game not found")
+        return JSONResponse(payload, headers=NO_CACHE)
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request):
@@ -106,8 +108,19 @@ def create_app(store: GameStore | None = None) -> FastAPI:
             context={"games": games},
         )
 
+    @app.get("/games.json")
+    def games_json():
+        return live_games()
+
+    @app.get("/game/{game_id}/live")
+    def game_live(game_id: str):
+        return live_game(game_id)
+
     @app.get("/game/{game_id}", response_class=HTMLResponse)
     def game_page(request: Request, game_id: str):
+        accept = request.headers.get("accept", "").split(",")[0].strip()
+        if accept.startswith("application/json"):
+            return live_game(game_id)
         game = store.get_game(game_id)
         if game is None:
             raise HTTPException(status_code=404, detail="Game not found")
@@ -142,14 +155,20 @@ def create_app(store: GameStore | None = None) -> FastAPI:
 
     @app.get("/api/games")
     def api_games():
-        return JSONResponse({"games": store.list_games()}, headers=NO_CACHE)
+        return live_games()
 
     @app.get("/api/game/{game_id}")
     def api_game(game_id: str):
-        payload = _game_payload(store, game_id)
-        if payload is None:
-            raise HTTPException(status_code=404, detail="Game not found")
-        return JSONResponse(payload, headers=NO_CACHE)
+        return live_game(game_id)
+
+    app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
+
+    @app.middleware("http")
+    async def disable_cache(request: Request, call_next):
+        response = await call_next(request)
+        for key, value in NO_CACHE.items():
+            response.headers[key] = value
+        return response
 
     return app
 
@@ -158,4 +177,6 @@ app = create_app()
 
 
 def main() -> None:
+    print("Game Analyzer web: http://0.0.0.0:8000")
+    print("Stop any old server first (Ctrl+C), or it will keep 404ing /api/game.")
     uvicorn.run("game_analyzer.web:app", host="0.0.0.0", port=8000, reload=False)
