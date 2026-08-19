@@ -154,14 +154,15 @@ class GameStore:
                 ),
             )
 
-    def list_games(self) -> list[dict]:
+    def list_games(self, *, newest_first: bool = True) -> list[dict]:
+        order = "DESC" if newest_first else "ASC"
         with self._connect(autocommit=True) as con:
             rows = con.execute(
-                """
+                f"""
                 SELECT game_id, started_at, finished_at, winner_suit,
                        (SELECT COUNT(*) FROM frames f WHERE f.game_id = games.game_id) AS shot_count
                 FROM games
-                ORDER BY id DESC
+                ORDER BY id {order}
                 """
             ).fetchall()
         return [dict(r) for r in rows]

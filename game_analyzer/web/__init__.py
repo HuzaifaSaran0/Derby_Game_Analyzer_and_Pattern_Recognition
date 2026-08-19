@@ -60,8 +60,9 @@ def _game_payload(store: GameStore, game_id: str) -> dict | None:
     game = store.get_game(game_id)
     if game is None:
         return None
-    ids = [g["game_id"] for g in store.list_games()]
+    ids = [g["game_id"] for g in store.list_games(newest_first=False)]
     prev_id, next_id = _neighbors(ids, game_id)
+    latest_id = ids[-1] if ids else None
     return {
         "game_id": game.game_id,
         "winner": _winner_label(game.winner_suit),
@@ -80,6 +81,7 @@ def _game_payload(store: GameStore, game_id: str) -> dict | None:
         ],
         "prev_id": prev_id,
         "next_id": next_id,
+        "latest_id": latest_id,
         "index": ids.index(game_id) + 1 if game_id in ids else 0,
         "total": len(ids),
     }
@@ -91,7 +93,8 @@ def create_app(store: GameStore | None = None) -> FastAPI:
     templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
 
     def live_games() -> JSONResponse:
-        return JSONResponse({"games": store.list_games()}, headers=NO_CACHE)
+        games = store.list_games()
+        return JSONResponse({"games": games}, headers=NO_CACHE)
 
     def live_game(game_id: str) -> JSONResponse:
         payload = _game_payload(store, game_id)
@@ -124,8 +127,9 @@ def create_app(store: GameStore | None = None) -> FastAPI:
         game = store.get_game(game_id)
         if game is None:
             raise HTTPException(status_code=404, detail="Game not found")
-        ids = [g["game_id"] for g in store.list_games()]
+        ids = [g["game_id"] for g in store.list_games(newest_first=False)]
         prev_id, next_id = _neighbors(ids, game_id)
+        latest_id = ids[-1] if ids else None
         return templates.TemplateResponse(
             request=request,
             name="game.html",
@@ -134,6 +138,7 @@ def create_app(store: GameStore | None = None) -> FastAPI:
                 "table": _styled_table(game.table_cards),
                 "prev_id": prev_id,
                 "next_id": next_id,
+                "latest_id": latest_id,
                 "index": ids.index(game_id) + 1 if game_id in ids else 0,
                 "total": len(ids),
                 "winner": _winner_label(game.winner_suit),

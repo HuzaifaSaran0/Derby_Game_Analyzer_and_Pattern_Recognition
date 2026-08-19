@@ -13,6 +13,11 @@
 
   function render(games) {
     empty.hidden = games.length > 0;
+    const latestBtn = document.querySelector(".jump-latest");
+    if (latestBtn && games.length > 0) {
+      latestBtn.setAttribute("href", "/game/" + games[0].game_id);
+      latestBtn.hidden = false;
+    }
     list.innerHTML = games
       .map(function (g) {
         const winner = g.winner_suit

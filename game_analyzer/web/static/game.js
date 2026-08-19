@@ -184,6 +184,16 @@
     }
   }
 
+  function setNavLatest(el, id) {
+    if (id && id !== gameId) {
+      el.setAttribute("href", "/game/" + id);
+      el.classList.remove("disabled");
+    } else {
+      el.removeAttribute("href");
+      el.classList.add("disabled");
+    }
+  }
+
   function apply(data) {
     document.querySelector("[data-winner]").textContent = data.winner;
     const meta = "Started " + data.started_at + (data.finished_at ? " · Finished " + data.finished_at : "");
@@ -191,6 +201,7 @@
     document.querySelector("[data-game-pos]").textContent = data.index + " / " + data.total;
     setNav(document.querySelector('[data-nav="prev"]'), data.prev_id);
     setNav(document.querySelector('[data-nav="next"]'), data.next_id);
+    setNavLatest(document.querySelector('[data-nav="latest"]'), data.latest_id);
     renderTable(data.table);
     applyFrames(data.frames || []);
   }

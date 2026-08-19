@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#111114" />
   <title>Game {{ game.game_id }}</title>
-  <link rel="stylesheet" href="/static/style.css?v=5" />
+  <link rel="stylesheet" href="/static/style.css?v=6" />
 </head>
 <body data-page="game" data-game-id="{{ game.game_id }}">
   <header class="top">
@@ -16,6 +16,7 @@
 
   <nav class="pager">
     <a class="btn{% if not prev_id %} disabled{% endif %}" data-nav="prev" {% if prev_id %}href="/game/{{ prev_id }}"{% endif %}>Previous</a>
+    <a class="btn btn-latest{% if latest_id == game.game_id %} disabled{% endif %}" data-nav="latest" {% if latest_id and latest_id != game.game_id %}href="/game/{{ latest_id }}"{% endif %}>Latest</a>
     <a class="btn{% if not next_id %} disabled{% endif %}" data-nav="next" {% if next_id %}href="/game/{{ next_id }}"{% endif %}>Next</a>
   </nav>
 
@@ -83,7 +84,7 @@
     <button type="button" class="lightbox-nav lightbox-next" aria-label="Next screenshot">›</button>
     <p class="lightbox-status"></p>
   </div>
-  <script src="/static/live.js?v=5"></script>
-  <script src="/static/game.js?v=5"></script>
+  <script src="/static/live.js?v=6"></script>
+  <script src="/static/game.js?v=6"></script>
 </body>
 </html>

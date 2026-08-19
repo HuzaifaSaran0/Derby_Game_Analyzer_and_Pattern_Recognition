@@ -54,6 +54,18 @@ body.no-scroll { overflow: hidden; }
 .btn.disabled {
   background: #333;
   color: #777;
+  pointer-events: none;
+}
+.btn-latest {
+  background: #31c96b;
+}
+.btn-latest.disabled {
+  background: #333;
+  color: #777;
+}
+.jump-latest {
+  display: block;
+  margin-bottom: 12px;
 }
 
 .fetched {
