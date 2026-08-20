@@ -168,11 +168,60 @@ _GAME_ID_JS = r"""
 })()
 """
 
+_TIMER_JS = r"""
+(() => {
+  const bodyText = document.body ? (document.body.innerText || '') : '';
 
-def read_page_game_id(capture: dict) -> str | None:
-    """Read the on-page Game ID via CDP. No screenshot. None if not Brave/CDP or not found."""
+  // Prefer the large circle countdown in the top band. Footer text like
+  // "1st 32 to go" is often stale / not the round clock (seen with circle=24).
+  const h = window.innerHeight || 800;
+  const candidates = [];
+  const walk = (el) => {
+    if (!el) return;
+    if (el.children && el.children.length) {
+      for (const child of el.children) walk(child);
+      return;
+    }
+    const text = (el.textContent || '').trim();
+    if (!/^\d{1,2}$/.test(text)) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.top < 0 || rect.top > h * 0.28 || rect.width <= 0 || rect.height <= 0) return;
+    const n = parseInt(text, 10);
+    if (n < 0 || n > 60) return;
+    candidates.push({ n, area: rect.width * rect.height, top: rect.top });
+  };
+  if (document.body) walk(document.body);
+  if (candidates.length) {
+    candidates.sort((a, b) => (b.area - a.area) || (a.top - b.top));
+    return { seconds: candidates[0].n, source: 'header' };
+  }
+
+  const skip = /^(game id|round|back|lay|spades|hearts|clubs|diamonds)\b/i;
+  const lines = bodyText.split(/\n+/).map((s) => s.trim()).filter(Boolean).slice(0, 12);
+  for (const line of lines) {
+    if (skip.test(line)) continue;
+    if (/to\s+go\b/i.test(line)) continue;
+    if (/^\d{1,2}$/.test(line)) {
+      const n = parseInt(line, 10);
+      if (n >= 0 && n <= 60) {
+        return { seconds: n, source: 'header' };
+      }
+    }
+  }
+
+  // Do not use footer "1st 32 to go" — it is often stale and not the circle clock.
+  return { seconds: null, source: null };
+})()
+"""
+
+
+def _cdp_mode(capture: dict) -> bool:
     mode = str(capture.get("mode", "screen")).lower()
-    if mode not in {"brave_cdp", "brave", "cdp"}:
+    return mode in {"brave_cdp", "brave", "cdp"}
+
+
+def _cdp_evaluate(capture: dict, expression: str) -> dict | None:
+    if not _cdp_mode(capture):
         return None
     host = str(capture.get("cdp_host", "127.0.0.1"))
     port = int(capture.get("cdp_port", 9222))
@@ -180,16 +229,33 @@ def read_page_game_id(capture: dict) -> str | None:
     try:
         tabs = list_brave_tabs(host, port)
         tab = _pick_game_tab(tabs, needle)
-        result = _cdp_call(
+        return _cdp_call(
             tab["webSocketDebuggerUrl"],
             "Runtime.evaluate",
-            {"expression": _GAME_ID_JS, "returnByValue": True},
+            {"expression": expression, "returnByValue": True},
         )
     except Exception:
         return None
+
+
+def read_page_game_id(capture: dict) -> str | None:
+    """Read the on-page Game ID via CDP. No screenshot. None if not Brave/CDP or not found."""
+    result = _cdp_evaluate(capture, _GAME_ID_JS)
     value = ((result.get("result") or {}).get("value")) if result else None
     if isinstance(value, str) and value.isdigit():
         return value
+    return None
+
+
+def read_page_timer(capture: dict):
+    """Read the round countdown via CDP. No screenshot."""
+    from game_analyzer.timer import parse_timer_from_cdp_value, parse_timer_from_text
+
+    result = _cdp_evaluate(capture, _TIMER_JS)
+    value = ((result.get("result") or {}).get("value")) if result else None
+    parsed = parse_timer_from_cdp_value(value)
+    if parsed is not None:
+        return parsed
     return None
 
 

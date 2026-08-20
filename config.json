@@ -1,5 +1,5 @@
 {
-  "notes": "mode=brave_cdp captures the whole tab, then auto_crop removes sidebar + Matched Bets (like the old game-only screen box). Set page_crop manually to override. mode=screen still uses left/top/width/height on the desktop.",
+  "notes": "Hybrid schedule (brave_cdp): read timer on game-start shot and sleep that long; after handicap wait handicap_wait_seconds (~37); mid draws wait mid_round_seconds (~32); after each IN_PLAY poll result_window_seconds for WINNER. dual_trigger retries if cards lag. Screen mode uses the same schedule without CDP timer reads.",
   "capture": {
     "mode": "brave_cdp",
     "cdp_host": "127.0.0.1",
@@ -12,9 +12,22 @@
     "width": 773,
     "height": 620,
     "delay_seconds": 5,
-    "round_seconds": 32,
-    "cards_appear_after": 10,
-    "start_poll_seconds": 3
+    "handicap_wait_seconds": 37,
+    "mid_round_seconds": 32,
+    "first_round_remaining": 26,
+    "cards_appear_after": 1.0,
+    "start_poll_seconds": 1.5,
+    "round_seconds": 37,
+    "round_seconds_rest": 32,
+    "fallback_seconds": 42,
+    "use_timer_sync": true,
+    "timer_capture_at": 1,
+    "timer_reset_above": 20,
+    "dual_trigger_enabled": true,
+    "dual_trigger_settle_seconds": 4.0,
+    "dual_trigger_peek_seconds": 0.25,
+    "result_window_seconds": 13,
+    "result_poll_seconds": 0.5
   },
   "draw_overlays": false,
   "consensus_frames": 3,
