@@ -58,7 +58,8 @@ def test_hybrid_schedule_timer_then_37_then_32():
     start = tracker.observe(
         _result(), captured_at=NOW, game_id="105211667", timer_seconds=25
     )
-    assert start.next_wait_seconds == 25
+    assert start.next_wait_seconds == 26
+    assert start.wait_from_live_timer is True
 
     # After handicap appears: always 37s to first draw (ignore stale "32" timer reads).
     dealt = tracker.observe(
@@ -99,7 +100,8 @@ def test_dealt_mid_join_uses_circle_timer():
         game_id="99",
         timer_seconds=27,
     )
-    assert mid.next_wait_seconds == 27
+    assert mid.next_wait_seconds == 28
+    assert mid.wait_from_live_timer is True
 
 
 def test_start_without_timer_uses_first_round_remaining():
@@ -174,10 +176,22 @@ def test_finished_leftover_with_timer_starts_new_game():
     )
     assert sync.recording is True
     assert sync.should_save is False
+    assert sync.seq == 0
     assert sync.session_id == "game_411"
-    assert sync.next_wait_seconds == 25
-    assert sync.reason == "leftover previous result — sync new game to timer"
+    assert sync.next_wait_seconds == 26
+    assert sync.wait_from_live_timer is True
+
     assert tracker._ignored_game_id is None
+
+    dealt = tracker.observe(
+        _result(handicap_cards=HANDICAP),
+        captured_at=NOW,
+        game_id="411",
+        timer_seconds=0,
+    )
+    assert dealt.should_save is True
+    assert dealt.seq == 1
+    assert dealt.phase == GamePhase.DEALT
 
 
 def test_finished_leftover_without_timer_does_not_blacklist():
@@ -223,7 +237,7 @@ def test_after_finished_same_game_id_does_not_restart_session():
     assert nxt.recording is True
     assert nxt.should_save is False
     assert nxt.session_id == "game_732"
-    assert nxt.next_wait_seconds == 25
+    assert nxt.next_wait_seconds == 26
 
     tracker = GameSessionTracker(RoundTiming())
     dealt = tracker.observe(
@@ -234,7 +248,8 @@ def test_after_finished_same_game_id_does_not_restart_session():
     )
     assert dealt.recording is True
     assert dealt.should_save is True
-    assert dealt.next_wait_seconds == 24
+    assert dealt.next_wait_seconds == 25
+    assert dealt.wait_from_live_timer is True
     assert dealt.session_id == "game_99"
 
 

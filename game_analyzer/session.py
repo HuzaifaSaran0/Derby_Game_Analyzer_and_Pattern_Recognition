@@ -21,6 +21,8 @@ class RoundTiming:
     """Phase schedule: timer at game start, ~37s after handicap, ~32s mid draws.
 
     first_round_remaining is only used when the on-page timer cannot be read.
+    timer_wait_pad_seconds: circle shows floored whole seconds (25 means <26 left),
+    so we add 1s when sleeping on a live timer reading to avoid capturing early.
     """
 
     handicap_wait_seconds: float = 37.0
@@ -28,6 +30,7 @@ class RoundTiming:
     first_round_remaining: float = 26.0
     cards_appear_after: float = 1.0
     start_poll_seconds: float = 1.5
+    timer_wait_pad_seconds: float = 1.0
     # Kept for older configs / screen-mode fallbacks
     fallback_seconds: float = 42.0
     round_seconds: float = 37.0
@@ -47,6 +50,8 @@ class SessionDecision:
     watch_result: bool = False
     game_id: str | None = None
     peek_id_only: bool = False
+    # True when next_wait_seconds came from the on-page circle (anchor sleep to timer sample).
+    wait_from_live_timer: bool = False
     table_cards: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
     def folder_name(self) -> str:
@@ -144,19 +149,22 @@ class GameSessionTracker:
         self._ignored_game_id = None
         self.session_id = self._new_session_id(captured_at, game_id)
         self.session_game_id = game_id
-        self.seq = 1
+        # Unsaved sync shots (e.g. leftover previous result) must not consume seq 1,
+        # or the first real save becomes 002_DEALT with no 001 on disk/UI.
+        self.seq = 1 if should_save else 0
         self._last_fingerprint = fingerprint
         if ingest:
             self._ingest_cards(result)
         if phase == GamePhase.DEALT:
             # First-round handicap already up: follow remaining circle time, else full 37s.
-            if timer_seconds is not None and timer_seconds > 0:
-                wait = float(timer_seconds)
+            from_timer = timer_seconds is not None and timer_seconds > 0
+            if from_timer:
+                wait = self._padded_timer_wait(timer_seconds)
             else:
                 wait = t.handicap_wait_seconds
             reason = reason or "joined at handicap — sync to timer for first draw"
         else:
-            wait = self._wait_after_start(timer_seconds)
+            wait, from_timer = self._wait_after_start(timer_seconds)
             reason = reason or "new game detected — shot now, wait for handicap"
         return SessionDecision(
             recording=True,
@@ -168,8 +176,13 @@ class GameSessionTracker:
             next_wait_seconds=wait,
             wait_mode=WaitMode.FIXED,
             game_id=game_id,
+            wait_from_live_timer=from_timer,
             table_cards=self._table_cards(),
         )
+
+    def _padded_timer_wait(self, timer_seconds: int) -> float:
+        """Sleep on floored circle digit: display N ⇒ add pad so we are not 1s early."""
+        return float(timer_seconds) + self.timing.timer_wait_pad_seconds
 
     def _wait_with_timer_or_default(
         self, timer_seconds: int | None, default_seconds: float
@@ -179,19 +192,23 @@ class GameSessionTracker:
             return float(timer_seconds)
         return default_seconds
 
-    def _wait_after_start(self, timer_seconds: int | None) -> float:
-        """Game-start countdown: use circle time, or short settle if already 0."""
+    def _wait_after_start(self, timer_seconds: int | None) -> tuple[float, bool]:
+        """Game-start countdown: use circle time, or short settle if already 0.
+
+        Returns (wait_seconds, from_live_timer).
+        """
         t = self.timing
         if timer_seconds is not None and timer_seconds > 0:
-            return float(timer_seconds)
+            return self._padded_timer_wait(timer_seconds), True
         if timer_seconds == 0:
-            return t.cards_appear_after
-        return t.first_round_remaining
+            return t.cards_appear_after, False
+        return t.first_round_remaining, False
 
     def _wait_for_same_cards(self, phase: GamePhase, timer_seconds: int | None) -> float:
         t = self.timing
         if phase == GamePhase.START:
-            return self._wait_after_start(timer_seconds)
+            wait, _ = self._wait_after_start(timer_seconds)
+            return wait
         # After handicap is on screen, the next full segment to first draw is ~37s.
         if phase == GamePhase.DEALT:
             return t.handicap_wait_seconds
@@ -286,7 +303,7 @@ class GameSessionTracker:
             )
 
         if phase == GamePhase.START:
-            wait = self._wait_after_start(timer_seconds)
+            wait, from_timer = self._wait_after_start(timer_seconds)
             return SessionDecision(
                 recording=True,
                 session_id=self.session_id,
@@ -297,6 +314,7 @@ class GameSessionTracker:
                 next_wait_seconds=wait,
                 wait_mode=WaitMode.FIXED,
                 game_id=game_id or self.session_game_id,
+                wait_from_live_timer=from_timer,
                 table_cards=self._table_cards(),
             )
 

@@ -42,6 +42,7 @@ _LAST_RESULT = None
 _LAST_WAIT: WaitTrigger | None = None
 _CAPTURE_STARTED_AT: float | None = None
 _SCHEDULE_ANCHOR_AT: float | None = None
+_TIMER_SAMPLED_AT: float | None = None
 
 
 def _timing_from_config(config: dict) -> RoundTiming:
@@ -52,6 +53,7 @@ def _timing_from_config(config: dict) -> RoundTiming:
         first_round_remaining=float(cap.get("first_round_remaining", 26)),
         cards_appear_after=float(cap.get("cards_appear_after", 1.0)),
         start_poll_seconds=float(cap.get("start_poll_seconds", 1.5)),
+        timer_wait_pad_seconds=float(cap.get("timer_wait_pad_seconds", 1.0)),
         fallback_seconds=float(cap.get("fallback_seconds", 42.0)),
         round_seconds=float(cap.get("round_seconds", 37)),
         round_seconds_rest=float(cap.get("round_seconds_rest", 32)),
@@ -70,7 +72,7 @@ def _should_dual_retry(saved) -> bool:
 def capture_once(config: dict | None = None):
     """Grab via screen box or Brave CDP, save PNG + overlay, return paths/result."""
     global _LAST_DECISION, _LAST_FRAME, _LAST_PATH, _LAST_RESULT
-    global _CAPTURE_STARTED_AT, _SCHEDULE_ANCHOR_AT
+    global _CAPTURE_STARTED_AT, _SCHEDULE_ANCHOR_AT, _TIMER_SAMPLED_AT
     _CAPTURE_STARTED_AT = time.monotonic()
     config = config or load_config()
     SESSION_TRACKER.timing = _timing_from_config(config)
@@ -85,10 +87,14 @@ def capture_once(config: dict | None = None):
     ):
         return _LAST_PATH, _LAST_FRAME, _LAST_RESULT, _LAST_DECISION
 
+    # Sample timer before screenshot/OCR. Waiting "N seconds from capture start" after a
+    # post-OCR timer read double-counts processing and fires ~1s early.
+    timer = read_page_timer(capture) if timer_sync_enabled(capture) else None
+    _TIMER_SAMPLED_AT = time.monotonic()
+    timer_seconds = timer.seconds if timer is not None else None
+
     frame = grab_frame(config)
     result = extract_real(frame, config)
-    timer = read_page_timer(capture) if timer_sync_enabled(capture) else None
-    timer_seconds = timer.seconds if timer is not None else None
     captured_at = datetime.now()
     decision = SESSION_TRACKER.observe(
         result,
@@ -107,7 +113,7 @@ def capture_once(config: dict | None = None):
             overlay = draw_table_overlay(frame[:, :, ::-1], config, result)
             write_image(overlay_path, overlay[:, :, ::-1])
         GAME_STORE.record(decision, result, raw_path, captured_at)
-        # Anchor schedule waits to saved shots only (result peeks must not move the clock).
+        # Anchor fixed 32/37 schedule waits to saved shots (not result-window peeks).
         _SCHEDULE_ANCHOR_AT = _CAPTURE_STARTED_AT
     _LAST_DECISION = decision
     _LAST_FRAME = frame
@@ -137,8 +143,12 @@ def _wait_after_capture(config: dict, decision: SessionDecision) -> None:
     global _LAST_WAIT
     capture = config["capture"]
     settings = sync_settings_from_config(config)
-    # Prefer schedule anchor so result-window peeks do not eat the 32s budget.
-    started_at = _SCHEDULE_ANCHOR_AT or _CAPTURE_STARTED_AT
+    # Live circle waits: anchor to timer sample (not capture/OCR start).
+    # Fixed 32/37 waits: subtract processing from the saved-shot anchor.
+    if decision.wait_from_live_timer and _TIMER_SAMPLED_AT is not None:
+        started_at = _TIMER_SAMPLED_AT
+    else:
+        started_at = _SCHEDULE_ANCHOR_AT or _CAPTURE_STARTED_AT
     read_timer = lambda: read_page_timer(capture)
 
     outcome = wait_for_next_capture(

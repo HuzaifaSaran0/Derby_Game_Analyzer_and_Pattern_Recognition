@@ -21,6 +21,7 @@
     "round_seconds_rest": 32,
     "fallback_seconds": 42,
     "use_timer_sync": true,
+    "timer_wait_pad_seconds": 1,
     "timer_capture_at": 1,
     "timer_reset_above": 20,
     "dual_trigger_enabled": true,
