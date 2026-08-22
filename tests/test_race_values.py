@@ -49,6 +49,25 @@ def test_blend_weights_by_round():
     assert blend_weights(2) == (0.25, 0.75)
 
 
+def test_round_one_scores_unchanged_with_layer4():
+    scores = combined_scores(HANDICAP, ROUND1)
+    moved = track_position(ROUND1)
+    deck = remaining_deck(HANDICAP, ROUND1)
+    future = future_score(moved, deck)
+    track = {s: (v / TRACK_LENGTH if v is not None else None) for s, v in moved.items()}
+    for suit in scores:
+        assert scores[suit] == 0.5 * future[suit] + 0.5 * track[suit]
+
+
+def test_round_two_uses_layer4_blend():
+    from game_analyzer.race_values import LAYER4_WEIGHTS
+
+    scores = combined_scores(HANDICAP, SIX_DRAWS)
+    assert all(score is not None for score in scores.values())
+    tw, fw, cw, sw = LAYER4_WEIGHTS
+    assert abs(tw + fw + cw + sw - 1.0) < 1e-9
+
+
 def test_pre_race_guess_is_deck_only():
     assert pre_race_guess(HANDICAP) == "Hearts"
 

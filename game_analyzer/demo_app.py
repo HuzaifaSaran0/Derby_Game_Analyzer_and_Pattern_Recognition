@@ -236,6 +236,7 @@ class DemoApp(ctk.CTk):
             deck_p = snap.deck_pct.get(suit_name)
             track_p = snap.track_pct.get(suit_name)
             expected_p = snap.expected_pct.get(suit_name)
+            combo_p = snap.combo_pct.get(suit_name)
             combined = snap.combined_score.get(suit_name)
             is_best = suit_name == favourite or (
                 favourite is None and snap.draw_rounds_used == 0 and suit_name == preview
@@ -243,6 +244,12 @@ class DemoApp(ctk.CTk):
             is_preview = favourite is None and suit_name == preview and snap.draw_rounds_used > 0
             if snap.draw_rounds_used == 0:
                 text = f"deck {deck_p * 100:.0f}% · score {combined * 100:.0f}%"
+            elif snap.guess_ready:
+                text = (
+                    f"deck {deck_p * 100:.0f}% · track {track_p * 100:.0f}% · "
+                    f"finish {expected_p * 100:.0f}% · combo {combo_p * 100:.0f}% · "
+                    f"score {combined * 100:.0f}%"
+                )
             else:
                 text = (
                     f"deck {deck_p * 100:.0f}% · track {track_p * 100:.0f}% · "
@@ -256,12 +263,22 @@ class DemoApp(ctk.CTk):
                 color = ("gray10", "gray90")
             label.configure(text=text, text_color=color)
         if favourite:
-            dw = int(snap.deck_weight * 100)
-            tw = int(snap.track_weight * 100)
-            self.remaining_favourite.configure(
-                text=f"Best chance: {favourite} ({dw}% future deck + {tw}% track)",
-                text_color=SUIT_STYLES[favourite]["color"],
-            )
+            if snap.layer4_weights:
+                tw, fw, cw, sw = (int(w * 100) for w in snap.layer4_weights)
+                self.remaining_favourite.configure(
+                    text=(
+                        f"Best chance: {favourite} "
+                        f"({tw}% track + {fw}% future + {cw}% combo + {sw}% pool share)"
+                    ),
+                    text_color=SUIT_STYLES[favourite]["color"],
+                )
+            else:
+                dw = int(snap.deck_weight * 100)
+                tw = int(snap.track_weight * 100)
+                self.remaining_favourite.configure(
+                    text=f"Best chance: {favourite} ({dw}% future deck + {tw}% track)",
+                    text_color=SUIT_STYLES[favourite]["color"],
+                )
         elif snap.draw_rounds_used == 1 and preview:
             self.remaining_favourite.configure(
                 text=(

@@ -17,8 +17,11 @@ MAX_GUESS_DRAWS = GUESS_DRAW_ROUNDS * CARDS_PER_DRAW_ROUND
 BLEND_BY_ROUND: tuple[tuple[float, float], ...] = (
     (1.0, 0.0),  # 0 draw rounds — raw deck only
     (0.5, 0.5),  # 1 draw round — preview only
-    (0.25, 0.75),  # 2 draw rounds — official guess
+    (0.25, 0.75),  # 2 draw rounds — kept for display / fallback
 )
+
+# Layer 4 (round 2 only): track + future + combo finish paths + draw-pool share.
+LAYER4_WEIGHTS: tuple[float, float, float, float] = (0.50, 0.10, 0.15, 0.25)
 
 MEAN_CARD_VALUE = FULL_SUIT_TOTAL / 13  # ~7.31 per card in a full suit
 
@@ -246,13 +249,30 @@ def combined_scores(
     draw_cards: tuple[str, ...] = (),
 ) -> dict[str, float | None]:
     """Blend finish/deck + track scores using weights for current draw round."""
+    from game_analyzer.deck_combos import combo_side_score, draw_share, remaining_card_labels
+
     rounds = draw_rounds_seen(draw_cards)
     deck_w, track_w = blend_weights(rounds)
     deck_rem = remaining_deck(handicap_cards, draw_cards)
     moved = track_position(draw_cards)
     finish = finish_side_score(rounds, deck_rem, moved)
     track = track_score(moved)
-    out: dict[str, float | None] = {}
+    if rounds >= GUESS_DRAW_ROUNDS:
+        track_w4, future_w, combo_w, share_w = LAYER4_WEIGHTS
+        combo = combo_side_score(handicap_cards, draw_cards, moved)
+        share = draw_share(remaining_card_labels(handicap_cards, draw_cards))
+        out: dict[str, float | None] = {}
+        for suit in SUIT_NAMES:
+            f = finish[suit]
+            t = track[suit]
+            c = combo[suit]
+            s = share[suit]
+            if f is None or t is None or c is None or s is None:
+                out[suit] = None
+            else:
+                out[suit] = track_w4 * t + future_w * f + combo_w * c + share_w * s
+        return out
+    out = {}
     for suit in SUIT_NAMES:
         f = finish[suit]
         t = track[suit]
@@ -283,7 +303,7 @@ def race_guess(
     handicap_cards: tuple[tuple[str, ...], ...],
     draw_cards: tuple[str, ...] = (),
 ) -> str | None:
-    """Official pick after two draw rounds (25% finish + 75% track)."""
+    """Official pick after two draw rounds (Layer 4 blend)."""
     if not guess_ready(draw_cards):
         return None
     return favourite_combined(combined_scores(handicap_cards, draw_cards))
@@ -324,9 +344,13 @@ class RaceSnapshot:
     deck_pct: dict[str, float | None]
     track_pct: dict[str, float | None]
     expected_pct: dict[str, float | None]
+    combo_pct: dict[str, float | None]
+    draw_share_pct: dict[str, float | None]
+    remaining_cards: dict[str, tuple[str, ...] | None]
     combined_score: dict[str, float | None]
     deck_weight: float
     track_weight: float
+    layer4_weights: tuple[float, float, float, float] | None
     guess: str | None
     preview: str | None
     draw_rounds_used: int
@@ -337,6 +361,8 @@ def race_snapshot(
     handicap_cards: tuple[tuple[str, ...], ...],
     draw_cards: tuple[str, ...] = (),
 ) -> RaceSnapshot:
+    from game_analyzer.deck_combos import combo_side_score, draw_share, remaining_card_labels
+
     rounds = draw_rounds_seen(draw_cards)
     ready = guess_ready(draw_cards)
     deck_rem = remaining_deck(handicap_cards, draw_cards)
@@ -346,6 +372,10 @@ def race_snapshot(
     expected_p = finish_score(moved, deck_rem)
     combined = combined_scores(handicap_cards, draw_cards)
     deck_w, track_w = blend_weights(rounds)
+    rem_cards = remaining_card_labels(handicap_cards, draw_cards)
+    combo_p = combo_side_score(handicap_cards, draw_cards, moved)
+    share_p = draw_share(rem_cards)
+    layer4 = LAYER4_WEIGHTS if rounds >= GUESS_DRAW_ROUNDS else None
     return RaceSnapshot(
         deck_remaining=deck_rem,
         track_moved=moved,
@@ -353,9 +383,13 @@ def race_snapshot(
         deck_pct=deck_p,
         track_pct=track_p,
         expected_pct=expected_p,
+        combo_pct=combo_p,
+        draw_share_pct=share_p,
+        remaining_cards=rem_cards,
         combined_score=combined,
         deck_weight=deck_w,
         track_weight=track_w,
+        layer4_weights=layer4,
         guess=race_guess(handicap_cards, draw_cards),
         preview=preview_guess(handicap_cards, draw_cards),
         draw_rounds_used=rounds,
