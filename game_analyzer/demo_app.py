@@ -78,7 +78,7 @@ class DemoApp(ctk.CTk):
         remaining_panel.pack(fill="x", pady=(0, 8))
         ctk.CTkLabel(
             remaining_panel,
-            text="Win chance (deck % + track % blend)",
+            text="Win chance (expected finish + track blend)",
             font=("Segoe UI", 13, "bold"),
         ).pack(anchor="w", padx=12, pady=(10, 4))
         self.remaining_rows: dict[str, ctk.CTkLabel] = {}
@@ -172,7 +172,7 @@ class DemoApp(ctk.CTk):
         self.guess_stats.configure(
             text=(
                 f"Guess accuracy: {stats.correct}/{stats.total} "
-                f"({stats.percent:.0f}%) — 25% deck + 75% track after 2 draw rounds"
+                f"({stats.percent:.0f}%) — 25% future deck + 75% track after 2 rounds"
             ),
             text_color="#58a6ff" if stats.percent and stats.percent >= 50 else "#ff9f43",
         )
@@ -235,15 +235,19 @@ class DemoApp(ctk.CTk):
                 continue
             deck_p = snap.deck_pct.get(suit_name)
             track_p = snap.track_pct.get(suit_name)
+            expected_p = snap.expected_pct.get(suit_name)
             combined = snap.combined_score.get(suit_name)
             is_best = suit_name == favourite or (
                 favourite is None and snap.draw_rounds_used == 0 and suit_name == preview
             )
             is_preview = favourite is None and suit_name == preview and snap.draw_rounds_used > 0
-            text = (
-                f"deck {deck_p * 100:.0f}% · track {track_p * 100:.0f}% · "
-                f"score {combined * 100:.0f}%"
-            )
+            if snap.draw_rounds_used == 0:
+                text = f"deck {deck_p * 100:.0f}% · score {combined * 100:.0f}%"
+            else:
+                text = (
+                    f"deck {deck_p * 100:.0f}% · track {track_p * 100:.0f}% · "
+                    f"finish {expected_p * 100:.0f}% · score {combined * 100:.0f}%"
+                )
             if is_best and favourite:
                 color = SUIT_STYLES[suit_name]["color"]
             elif is_preview:
@@ -255,14 +259,14 @@ class DemoApp(ctk.CTk):
             dw = int(snap.deck_weight * 100)
             tw = int(snap.track_weight * 100)
             self.remaining_favourite.configure(
-                text=f"Best chance: {favourite} ({dw}% deck + {tw}% track)",
+                text=f"Best chance: {favourite} ({dw}% future deck + {tw}% track)",
                 text_color=SUIT_STYLES[favourite]["color"],
             )
         elif snap.draw_rounds_used == 1 and preview:
             self.remaining_favourite.configure(
                 text=(
                     f"Round 1/2 — preview leader {preview} "
-                    f"(50% deck + 50% track). Need round 2 to lock guess."
+                    f"(50% expected finish + 50% track). Need round 2 to lock guess."
                 ),
                 text_color="#888888",
             )

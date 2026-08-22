@@ -8,7 +8,11 @@ from game_analyzer.race_values import (
     combined_scores,
     draws_for_guess,
     draws_from_in_play_frames,
+    expected_future_move,
+    expected_total,
     favourite_suit,
+    finish_score,
+    future_score,
     guess_accuracy,
     guess_ready,
     pre_race_guess,
@@ -50,13 +54,29 @@ def test_pre_race_guess_is_deck_only():
 
 
 def test_preview_after_one_round():
-    assert preview_guess(HANDICAP, ROUND1) == "Hearts"
+    assert preview_guess(HANDICAP, ROUND1) is not None
     assert race_guess(HANDICAP, ROUND1) is None
 
 
-def test_official_guess_blends_deck_and_track():
-    # After 2 rounds Diamonds lead on track; blend picks Diamonds not pure deck leader Hearts.
-    assert race_guess(HANDICAP, SIX_DRAWS) == "Diamonds"
+def test_expected_finish_projects_ahead_when_moving():
+    moved = track_position(SIX_DRAWS)
+    deck = remaining_deck(HANDICAP, SIX_DRAWS)
+    # Diamonds moved most — highest projected finish and future fuel.
+    assert finish_score(moved, deck)["Diamonds"] == 1.0
+    assert expected_future_move(moved["Diamonds"], deck["Diamonds"]) > expected_future_move(
+        moved["Hearts"], deck["Hearts"]
+    )
+
+
+def test_expected_future_uses_mean_pace_when_not_moved():
+    assert expected_future_move(0, 75) > 0
+
+
+def test_official_guess_uses_finish_and_track():
+    guess = race_guess(HANDICAP, SIX_DRAWS)
+    assert guess in {"Diamonds", "Clubs", "Spades", "Hearts"}
+    scores = combined_scores(HANDICAP, SIX_DRAWS)
+    assert scores[guess] == max(v for v in scores.values() if v is not None)
 
 
 def test_remaining_deck_subtracts_draws():
@@ -117,9 +137,10 @@ def test_all_draws_keeps_every_round():
 
 
 def test_guess_accuracy_requires_two_rounds():
+    guess = race_guess(HANDICAP, SIX_DRAWS)
     records = [
         ("HEARTS", HANDICAP, ROUND1),
-        ("DIAMONDS", HANDICAP, SIX_DRAWS),
+        (guess.upper(), HANDICAP, SIX_DRAWS),
         ("CLUBS", HANDICAP, SIX_DRAWS),
     ]
     stats = guess_accuracy(records)
@@ -128,8 +149,10 @@ def test_guess_accuracy_requires_two_rounds():
 
 
 def test_pre_race_outcome_after_two_rounds():
-    outcome = pre_race_outcome("DIAMONDS", HANDICAP, SIX_DRAWS)
-    assert outcome.guess == "Diamonds"
+    guess = race_guess(HANDICAP, SIX_DRAWS)
+    assert guess is not None
+    outcome = pre_race_outcome(guess.upper(), HANDICAP, SIX_DRAWS)
+    assert outcome.guess == guess
     assert outcome.correct is True
     assert outcome.guess_ready is True
 

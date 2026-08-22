@@ -11,13 +11,16 @@ GUESS_DRAW_ROUNDS = 2
 CARDS_PER_DRAW_ROUND = 3
 MAX_GUESS_DRAWS = GUESS_DRAW_ROUNDS * CARDS_PER_DRAW_ROUND
 
-# Option B: deck vs track blend by draw round (0–2).
-# Round 0 = handicap only, round 1 = preview, round 2 = official guess.
+# Option B: finish vs track blend by draw round (0–2).
+# Round 0 = handicap only (raw deck), round 1 = preview, round 2 = official guess.
+# Option C: from round 1 onward, "deck" side uses projected finish (moved + expected future).
 BLEND_BY_ROUND: tuple[tuple[float, float], ...] = (
-    (1.0, 0.0),  # 0 draw rounds — deck only
+    (1.0, 0.0),  # 0 draw rounds — raw deck only
     (0.5, 0.5),  # 1 draw round — preview only
     (0.25, 0.75),  # 2 draw rounds — official guess
 )
+
+MEAN_CARD_VALUE = FULL_SUIT_TOTAL / 13  # ~7.31 per card in a full suit
 
 SUIT_NAMES = ("Spades", "Hearts", "Clubs", "Diamonds")
 _SUIT_BY_LETTER = {"S": "Spades", "H": "Hearts", "C": "Clubs", "D": "Diamonds"}
@@ -180,23 +183,83 @@ def track_score(track_moved: dict[str, int | None]) -> dict[str, float | None]:
     }
 
 
+def expected_future_move(moved: int, deck_left: int) -> float:
+    """Estimate how many more track points a suit can still draw from its pile."""
+    if deck_left <= 0:
+        return 0.0
+    if moved <= 0:
+        return deck_left * (MEAN_CARD_VALUE / TRACK_LENGTH)
+    return deck_left * (moved / TRACK_LENGTH)
+
+
+def expected_total(moved: int, deck_left: int) -> float:
+    """Projected finish distance: already moved + expected future movement."""
+    return moved + expected_future_move(moved, deck_left)
+
+
+def future_score(
+    track_moved: dict[str, int | None],
+    deck_remaining: dict[str, int | None],
+) -> dict[str, float | None]:
+    """Option C deck-side signal: expected future movement only (0–1)."""
+    out: dict[str, float | None] = {}
+    for suit in SUIT_NAMES:
+        moved = track_moved.get(suit)
+        deck_left = deck_remaining.get(suit)
+        if moved is None or deck_left is None:
+            out[suit] = None
+        else:
+            out[suit] = expected_future_move(moved, deck_left) / TRACK_LENGTH
+    return out
+
+
+def finish_score(
+    track_moved: dict[str, int | None],
+    deck_remaining: dict[str, int | None],
+) -> dict[str, float | None]:
+    """Option C: projected distance to finish as 0–1 (capped at 32)."""
+    out: dict[str, float | None] = {}
+    for suit in SUIT_NAMES:
+        moved = track_moved.get(suit)
+        deck_left = deck_remaining.get(suit)
+        if moved is None or deck_left is None:
+            out[suit] = None
+        else:
+            total = expected_total(moved, deck_left)
+            out[suit] = min(1.0, total / TRACK_LENGTH)
+    return out
+
+
+def finish_side_score(
+    draw_rounds: int,
+    deck_remaining: dict[str, int | None],
+    track_moved: dict[str, int | None],
+) -> dict[str, float | None]:
+    """Non-track side: raw deck before draws, expected future movement after."""
+    if draw_rounds <= 0:
+        return deck_score(deck_remaining)
+    return future_score(track_moved, deck_remaining)
+
+
 def combined_scores(
     handicap_cards: tuple[tuple[str, ...], ...],
     draw_cards: tuple[str, ...] = (),
 ) -> dict[str, float | None]:
-    """Blend deck + track scores using weights for current draw round."""
+    """Blend finish/deck + track scores using weights for current draw round."""
     rounds = draw_rounds_seen(draw_cards)
     deck_w, track_w = blend_weights(rounds)
-    deck = deck_score(remaining_deck(handicap_cards, draw_cards))
-    track = track_score(track_position(draw_cards))
+    deck_rem = remaining_deck(handicap_cards, draw_cards)
+    moved = track_position(draw_cards)
+    finish = finish_side_score(rounds, deck_rem, moved)
+    track = track_score(moved)
     out: dict[str, float | None] = {}
     for suit in SUIT_NAMES:
-        d = deck[suit]
+        f = finish[suit]
         t = track[suit]
-        if d is None or t is None:
+        if f is None or t is None:
             out[suit] = None
         else:
-            out[suit] = deck_w * d + track_w * t
+            out[suit] = deck_w * f + track_w * t
     return out
 
 
@@ -220,7 +283,7 @@ def race_guess(
     handicap_cards: tuple[tuple[str, ...], ...],
     draw_cards: tuple[str, ...] = (),
 ) -> str | None:
-    """Official pick after two draw rounds (25% deck + 75% track)."""
+    """Official pick after two draw rounds (25% finish + 75% track)."""
     if not guess_ready(draw_cards):
         return None
     return favourite_combined(combined_scores(handicap_cards, draw_cards))
@@ -260,6 +323,7 @@ class RaceSnapshot:
     track_to_go: dict[str, int | None]
     deck_pct: dict[str, float | None]
     track_pct: dict[str, float | None]
+    expected_pct: dict[str, float | None]
     combined_score: dict[str, float | None]
     deck_weight: float
     track_weight: float
@@ -279,6 +343,7 @@ def race_snapshot(
     moved = track_position(draw_cards)
     deck_p = deck_score(deck_rem)
     track_p = track_score(moved)
+    expected_p = finish_score(moved, deck_rem)
     combined = combined_scores(handicap_cards, draw_cards)
     deck_w, track_w = blend_weights(rounds)
     return RaceSnapshot(
@@ -287,6 +352,7 @@ def race_snapshot(
         track_to_go=track_distance_to_go(draw_cards),
         deck_pct=deck_p,
         track_pct=track_p,
+        expected_pct=expected_p,
         combined_score=combined,
         deck_weight=deck_w,
         track_weight=track_w,
