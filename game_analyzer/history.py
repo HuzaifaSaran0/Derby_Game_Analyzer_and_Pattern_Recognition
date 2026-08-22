@@ -133,7 +133,8 @@ class HistoryWindow(ctk.CTkToplevel):
         if not outcome.guess_ready:
             if outcome.draw_rounds_used:
                 return (
-                    f"Guess: — (round {outcome.draw_rounds_used}/2 saved — need 2 draw rounds)"
+                    f"Guess: — (only {outcome.draw_rounds_used}/2 draw rounds readable — "
+                    f"need 6 cards; winner screen often hides 1)"
                 )
             return "Guess: — (no draw rounds saved yet)"
 
@@ -143,8 +144,9 @@ class HistoryWindow(ctk.CTkToplevel):
             return f"Guess: — (after 2 draw rounds, waiting for winner)"
 
         guess = outcome.guess.title()
+        rounds = outcome.draw_rounds_used or 2
         if outcome.winner is None:
-            return f"Guess: {guess} (after 2 draw rounds) — waiting for winner"
+            return f"Guess: {guess} (after {rounds} draw rounds) — waiting for winner"
         if outcome.correct:
             return f"Guess: {guess}  ✓ correct (winner: {winner_title})"
         return f"Guess: {guess}  ✗ wrong (winner: {winner_title})"

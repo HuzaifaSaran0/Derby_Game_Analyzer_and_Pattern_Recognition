@@ -14,6 +14,8 @@ from game_analyzer.race_values import (
     card_race_value,
     draws_for_guess,
     guess_accuracy,
+    guess_ready,
+    lock_guess,
     parse_draw_list,
     parse_handicap_rows,
     pre_race_outcome,
@@ -284,12 +286,19 @@ class GameStore:
         )
         stored_guess_draws = parse_draw_list(json.loads(game["guess_draws_json"] or "[]"))
         guess_draw_cards = stored_guess_draws or draws_for_guess(draw_cards)
+        guess_suit = game["guess_suit"]
+        # Older rows locked before FINISHED ingest — recompute from stored draws when missing.
+        if not guess_suit and handicap and guess_ready(guess_draw_cards):
+            locked = lock_guess(handicap, guess_draw_cards)
+            if locked is not None:
+                guess_suit = locked.suit
+                guess_draw_cards = locked.draw_cards
         return StoredGame(
             game_id=game["game_id"],
             started_at=game["started_at"],
             finished_at=game["finished_at"],
             winner_suit=game["winner_suit"],
-            guess_suit=game["guess_suit"],
+            guess_suit=guess_suit,
             handicap_cards=handicap,
             draw_cards=draw_cards,
             guess_draw_cards=guess_draw_cards,

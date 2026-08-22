@@ -59,7 +59,7 @@ def test_finished_frame_does_not_change_locked_guess():
         _result(
             race_state=RaceState.FINISHED,
             winner_suit=Suit.HEARTS,
-            draw_cards=("2H",),
+            draw_cards=("2H", "3D", "4C"),
         ),
         now,
         game_id="200",
@@ -67,6 +67,52 @@ def test_finished_frame_does_not_change_locked_guess():
     assert finished.locked_guess == locked
     assert finished.locked_guess_draws == SIX_DRAWS
     assert finished.locked_guess == race_guess(HANDICAP, SIX_DRAWS)
+    # Finished cards are still stored for history.
+    assert finished.drawn_cards == SIX_DRAWS + ("2H", "3D", "4C")
+
+
+def test_finished_frame_completes_second_round_and_locks():
+    """When round 2 only appears on the winner screen, still lock from those cards."""
+    tracker = GameSessionTracker()
+    now = datetime(2026, 8, 22, 12, 0, 0)
+
+    tracker.observe(_result(handicap_cards=HANDICAP), now, game_id="210")
+    tracker.observe(_result(draw_cards=ROUND1), now, game_id="210")
+    assert tracker.locked_guess is None
+
+    finished = tracker.observe(
+        _result(
+            race_state=RaceState.FINISHED,
+            winner_suit=Suit.CLUBS,
+            draw_cards=ROUND2,
+        ),
+        now,
+        game_id="210",
+    )
+    assert finished.locked_guess == race_guess(HANDICAP, SIX_DRAWS)
+    assert finished.locked_guess_draws == SIX_DRAWS
+    assert finished.locked_guess_rounds == 2
+    assert finished.drawn_cards == SIX_DRAWS
+
+
+def test_finished_partial_second_round_still_cannot_lock():
+    """Winner overlay often hides a card — fewer than 6 draws still means no guess."""
+    tracker = GameSessionTracker()
+    now = datetime(2026, 8, 22, 12, 0, 0)
+
+    tracker.observe(_result(handicap_cards=HANDICAP), now, game_id="220")
+    tracker.observe(_result(draw_cards=ROUND1), now, game_id="220")
+    finished = tracker.observe(
+        _result(
+            race_state=RaceState.FINISHED,
+            winner_suit=Suit.CLUBS,
+            draw_cards=("JC", "QC"),
+        ),
+        now,
+        game_id="220",
+    )
+    assert finished.locked_guess is None
+    assert finished.drawn_cards == ROUND1 + ("JC", "QC")
 
 
 def test_third_round_upgrades_lock_before_finished():

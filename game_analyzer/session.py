@@ -324,9 +324,15 @@ class GameSessionTracker:
             return self._waiting(phase, game_id, "waiting for next game start")
 
         if phase == GamePhase.FINISHED:
-            self._update_locked_guess()
-            lock_snapshot = self._lock_fields()
+            # Winner-screen draw cards are often the only copy of the deciding round
+            # (IN_PLAY for that round is frequently missed). Ingest them first so a
+            # second/third round can complete the lock — still card math only, never
+            # winner OCR. If we already locked earlier, do not upgrade from FINISHED.
+            already_locked = self.locked_guess is not None
             self._ingest_cards(result)
+            if not already_locked:
+                self._update_locked_guess()
+            lock_snapshot = self._lock_fields()
             self._last_fingerprint = fingerprint
             self.seq += 1
             self._close_after_save = True
