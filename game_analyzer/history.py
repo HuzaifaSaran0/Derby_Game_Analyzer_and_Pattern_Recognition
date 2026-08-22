@@ -63,7 +63,7 @@ class HistoryWindow(ctk.CTkToplevel):
             self.meta_label.configure(text="Capture a complete game first.")
             self._clear_shots()
             return
-        self.index = min(self.index, len(self.game_ids) - 1)
+        self.index = len(self.game_ids) - 1
         self.show()
 
     def prev(self) -> None:
@@ -91,12 +91,19 @@ class HistoryWindow(ctk.CTkToplevel):
         self.header.configure(text=f"{self.index + 1}/{len(self.game_ids)}  Game ID {game.game_id}")
         winner = game.winner_suit.title() if game.winner_suit else "none yet"
         self.winner_label.configure(text=f"Winner: {winner}")
-        outcome = pre_race_outcome(game.winner_suit, game.handicap_cards, game.guess_draw_cards)
+        outcome = pre_race_outcome(
+            game.winner_suit,
+            game.handicap_cards,
+            game.guess_draw_cards,
+            locked_guess=game.guess_suit,
+            locked_draw_rounds=len(game.guess_draw_cards) // 3 if game.guess_draw_cards else 0,
+        )
         self.guess_label.configure(text=self._guess_text(outcome, winner))
         draw_note = (
             f"draws saved {len(game.draw_cards)} total"
-            f" · guess uses first {len(game.guess_draw_cards)}"
-            f" · winner-round cards kept for history only"
+            f" · locked guess uses {len(game.guess_draw_cards)}"
+            f" ({len(game.guess_draw_cards) // 3} rounds)"
+            f" · winner-round cards are history only"
         )
         self.meta_label.configure(
             text=f"started {game.started_at}    finished {game.finished_at or '—'}    "

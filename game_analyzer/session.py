@@ -5,6 +5,10 @@ from datetime import datetime
 from enum import Enum
 
 from game_analyzer.models import ExtractionResult, GamePhase, merge_suit_cards
+from game_analyzer.race_values import (
+    CARDS_PER_DRAW_ROUND,
+    lock_guess,
+)
 
 
 class WaitMode(str, Enum):
@@ -54,6 +58,9 @@ class SessionDecision:
     wait_from_live_timer: bool = False
     table_cards: tuple[tuple[str, tuple[str, ...]], ...] = ()
     drawn_cards: tuple[str, ...] = ()
+    locked_guess: str | None = None
+    locked_guess_draws: tuple[str, ...] = ()
+    locked_guess_rounds: int = 0
 
     def folder_name(self) -> str:
         if self.recording and self.session_id:
@@ -82,6 +89,30 @@ class GameSessionTracker:
         self._ever_observed: bool = False
         self.handicap_cards: tuple[tuple[str, ...], ...] = ()
         self.drawn_cards: list[str] = []
+        self.locked_guess: str | None = None
+        self.locked_guess_draws: tuple[str, ...] = ()
+        self.locked_guess_rounds: int = 0
+
+    def _lock_fields(self) -> dict[str, object]:
+        return {
+            "locked_guess": self.locked_guess,
+            "locked_guess_draws": self.locked_guess_draws,
+            "locked_guess_rounds": self.locked_guess_rounds,
+        }
+
+    def _update_locked_guess(self) -> None:
+        """Freeze or upgrade the official guess from draw cards only — never from winner OCR."""
+        if not self.handicap_cards:
+            return
+        drawn = tuple(self.drawn_cards)
+        locked = lock_guess(self.handicap_cards, drawn)
+        if locked is None:
+            return
+        if locked.draw_rounds <= self.locked_guess_rounds:
+            return
+        self.locked_guess = locked.suit
+        self.locked_guess_draws = locked.draw_cards
+        self.locked_guess_rounds = locked.draw_rounds
 
     def _fingerprint(self, result: ExtractionResult) -> tuple:
         return (result.game_phase(), result.handicap_cards, result.draw_cards)
@@ -99,6 +130,9 @@ class GameSessionTracker:
         self._close_after_save = False
         self.handicap_cards = ()
         self.drawn_cards = []
+        self.locked_guess = None
+        self.locked_guess_draws = ()
+        self.locked_guess_rounds = 0
 
     def _table_cards(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
         return merge_suit_cards(self.handicap_cards, tuple(self.drawn_cards))
@@ -131,6 +165,7 @@ class GameSessionTracker:
             peek_id_only=peek,
             table_cards=self._table_cards(),
             drawn_cards=tuple(self.drawn_cards),
+            **self._lock_fields(),
         )
 
     def _begin_game(
@@ -181,6 +216,7 @@ class GameSessionTracker:
             wait_from_live_timer=from_timer,
             table_cards=self._table_cards(),
             drawn_cards=tuple(self.drawn_cards),
+            **self._lock_fields(),
         )
 
     def _padded_timer_wait(self, timer_seconds: int) -> float:
@@ -288,6 +324,8 @@ class GameSessionTracker:
             return self._waiting(phase, game_id, "waiting for next game start")
 
         if phase == GamePhase.FINISHED:
+            self._update_locked_guess()
+            lock_snapshot = self._lock_fields()
             self._ingest_cards(result)
             self._last_fingerprint = fingerprint
             self.seq += 1
@@ -304,6 +342,7 @@ class GameSessionTracker:
                 game_id=game_id or self.session_game_id,
                 table_cards=self._table_cards(),
                 drawn_cards=tuple(self.drawn_cards),
+                **lock_snapshot,
             )
 
         if phase == GamePhase.START:
@@ -321,6 +360,7 @@ class GameSessionTracker:
                 wait_from_live_timer=from_timer,
                 table_cards=self._table_cards(),
                 drawn_cards=tuple(self.drawn_cards),
+                **self._lock_fields(),
             )
 
         if fingerprint == self._last_fingerprint:
@@ -336,9 +376,11 @@ class GameSessionTracker:
                 game_id=game_id or self.session_game_id,
                 table_cards=self._table_cards(),
                 drawn_cards=tuple(self.drawn_cards),
+                **self._lock_fields(),
             )
 
         self._ingest_cards(result)
+        self._update_locked_guess()
         self._last_fingerprint = fingerprint
         self.seq += 1
         return SessionDecision(
@@ -354,4 +396,5 @@ class GameSessionTracker:
             game_id=game_id or self.session_game_id,
             table_cards=self._table_cards(),
             drawn_cards=tuple(self.drawn_cards),
+            **self._lock_fields(),
         )

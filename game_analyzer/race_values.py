@@ -7,9 +7,12 @@ from typing import Iterable
 
 FULL_SUIT_TOTAL = 95  # one suit: A=11, 2–10 face, J/Q/K=10 → 95 total
 TRACK_LENGTH = 32  # first suit to reach 32 on draw cards wins
-GUESS_DRAW_ROUNDS = 2
 CARDS_PER_DRAW_ROUND = 3
-MAX_GUESS_DRAWS = GUESS_DRAW_ROUNDS * CARDS_PER_DRAW_ROUND
+MIN_GUESS_DRAW_ROUNDS = 2  # minimum draw rounds before an official guess
+MAX_GUESS_DRAW_ROUNDS = 3  # use a third round when captured before FINISHED
+MIN_GUESS_DRAWS = MIN_GUESS_DRAW_ROUNDS * CARDS_PER_DRAW_ROUND
+MAX_GUESS_DRAWS = MAX_GUESS_DRAW_ROUNDS * CARDS_PER_DRAW_ROUND
+GUESS_DRAW_ROUNDS = MIN_GUESS_DRAW_ROUNDS
 
 # Option B: finish vs track blend by draw round (0–2).
 # Round 0 = handicap only (raw deck), round 1 = preview, round 2 = official guess.
@@ -17,7 +20,8 @@ MAX_GUESS_DRAWS = GUESS_DRAW_ROUNDS * CARDS_PER_DRAW_ROUND
 BLEND_BY_ROUND: tuple[tuple[float, float], ...] = (
     (1.0, 0.0),  # 0 draw rounds — raw deck only
     (0.5, 0.5),  # 1 draw round — preview only
-    (0.25, 0.75),  # 2 draw rounds — kept for display / fallback
+    (0.25, 0.75),  # 2+ draw rounds — kept for display / fallback
+    (0.25, 0.75),  # 3 draw rounds — official guess uses Layer 4 blend
 )
 
 # Layer 4 (round 2 only): track + future + combo finish paths + draw-pool share.
@@ -83,18 +87,23 @@ def draw_sums_by_suit(draw_cards: tuple[str, ...]) -> dict[str, int | None]:
 
 
 def draws_for_guess(draw_cards: tuple[str, ...]) -> tuple[str, ...]:
-    """Use draw cards from the first two rounds only (up to six cards)."""
+    """Draw cards used for guessing: up to three rounds (nine cards) when available."""
     return draw_cards[:MAX_GUESS_DRAWS]
 
 
+def guess_draw_rounds(draw_cards: tuple[str, ...]) -> int:
+    """Full draw rounds included in the guess slice (0–3)."""
+    return min(MAX_GUESS_DRAW_ROUNDS, len(draws_for_guess(draw_cards)) // CARDS_PER_DRAW_ROUND)
+
+
 def draw_rounds_seen(draw_cards: tuple[str, ...]) -> int:
-    """How many full or partial draw rounds are in ``draw_cards`` (0–2)."""
-    return min(GUESS_DRAW_ROUNDS, len(draw_cards) // CARDS_PER_DRAW_ROUND)
+    """How many full or partial draw rounds are in the guess slice (0–3)."""
+    return min(MAX_GUESS_DRAW_ROUNDS, len(draws_for_guess(draw_cards)) // CARDS_PER_DRAW_ROUND)
 
 
 def guess_ready(draw_cards: tuple[str, ...]) -> bool:
-    """True once two draw rounds (six cards) are available."""
-    return len(draw_cards) >= MAX_GUESS_DRAWS
+    """True once at least two draw rounds (six cards) are available."""
+    return len(draw_cards) >= MIN_GUESS_DRAWS
 
 
 def all_draws_from_in_play_frames(
@@ -119,7 +128,7 @@ def all_draws_from_in_play_frames(
 def draws_from_in_play_frames(
     frames: Iterable[tuple[str, tuple[str, ...]]],
 ) -> tuple[str, ...]:
-    """First two draw rounds from saved IN_PLAY frames."""
+    """Up to three draw rounds from saved IN_PLAY frames."""
     return draws_for_guess(all_draws_from_in_play_frames(frames))
 
 
@@ -257,7 +266,7 @@ def combined_scores(
     moved = track_position(draw_cards)
     finish = finish_side_score(rounds, deck_rem, moved)
     track = track_score(moved)
-    if rounds >= GUESS_DRAW_ROUNDS:
+    if rounds >= MIN_GUESS_DRAW_ROUNDS:
         track_w4, future_w, combo_w, share_w = LAYER4_WEIGHTS
         combo = combo_side_score(handicap_cards, draw_cards, moved)
         share = draw_share(remaining_card_labels(handicap_cards, draw_cards))
@@ -303,10 +312,31 @@ def race_guess(
     handicap_cards: tuple[tuple[str, ...], ...],
     draw_cards: tuple[str, ...] = (),
 ) -> str | None:
-    """Official pick after two draw rounds (Layer 4 blend)."""
+    """Official pick from two or three draw rounds (Layer 4 blend). Never uses winner OCR."""
     if not guess_ready(draw_cards):
         return None
     return favourite_combined(combined_scores(handicap_cards, draw_cards))
+
+
+@dataclass(frozen=True)
+class LockedGuess:
+    suit: str
+    draw_cards: tuple[str, ...]
+    draw_rounds: int
+
+
+def lock_guess(
+    handicap_cards: tuple[tuple[str, ...], ...],
+    draw_cards: tuple[str, ...],
+) -> LockedGuess | None:
+    """Compute the guess to freeze before a FINISHED frame (card math only)."""
+    if not guess_ready(draw_cards):
+        return None
+    used = draws_for_guess(draw_cards)
+    guess = race_guess(handicap_cards, draw_cards)
+    if not guess:
+        return None
+    return LockedGuess(suit=guess, draw_cards=used, draw_rounds=guess_draw_rounds(draw_cards))
 
 
 def preview_guess(
@@ -375,7 +405,7 @@ def race_snapshot(
     rem_cards = remaining_card_labels(handicap_cards, draw_cards)
     combo_p = combo_side_score(handicap_cards, draw_cards, moved)
     share_p = draw_share(rem_cards)
-    layer4 = LAYER4_WEIGHTS if rounds >= GUESS_DRAW_ROUNDS else None
+    layer4 = LAYER4_WEIGHTS if rounds >= MIN_GUESS_DRAW_ROUNDS else None
     return RaceSnapshot(
         deck_remaining=deck_rem,
         track_moved=moved,
@@ -410,31 +440,40 @@ def pre_race_outcome(
     winner_suit: str | None,
     handicap_cards: tuple[tuple[str, ...], ...],
     draw_cards: tuple[str, ...] = (),
+    locked_guess: str | None = None,
+    locked_draw_rounds: int = 0,
 ) -> PreRaceOutcome:
-    snapshot = race_snapshot(handicap_cards, draw_cards)
-    guess = snapshot.guess
+    if locked_guess:
+        guess = locked_guess
+        ready = True
+        rounds_used = locked_draw_rounds or guess_draw_rounds(draw_cards)
+    else:
+        snapshot = race_snapshot(handicap_cards, draw_cards)
+        guess = snapshot.guess
+        ready = snapshot.guess_ready
+        rounds_used = snapshot.draw_rounds_used
     if not winner_suit:
         return PreRaceOutcome(
             guess=guess,
             winner=None,
             correct=None,
-            draw_rounds_used=snapshot.draw_rounds_used,
-            guess_ready=snapshot.guess_ready,
+            draw_rounds_used=rounds_used,
+            guess_ready=ready,
         )
     if not guess:
         return PreRaceOutcome(
             guess=None,
             winner=winner_suit,
             correct=None,
-            draw_rounds_used=snapshot.draw_rounds_used,
-            guess_ready=snapshot.guess_ready,
+            draw_rounds_used=rounds_used,
+            guess_ready=ready,
         )
     return PreRaceOutcome(
         guess=guess,
         winner=winner_suit,
         correct=suits_match(guess, winner_suit),
-        draw_rounds_used=snapshot.draw_rounds_used,
-        guess_ready=snapshot.guess_ready,
+        draw_rounds_used=rounds_used,
+        guess_ready=ready,
     )
 
 
@@ -451,15 +490,22 @@ class GuessAccuracy:
 
 
 def guess_accuracy(
-    records: Iterable[tuple[str | None, tuple[tuple[str, ...], ...], tuple[str, ...]]],
+    records: Iterable[
+        tuple[
+            str | None,
+            tuple[tuple[str, ...], ...],
+            tuple[str, ...],
+            str | None,
+        ]
+    ],
 ) -> GuessAccuracy:
-    """Score picks on finished games with two draw rounds and a readable guess."""
+    """Score locked or recomputed picks on finished games with at least two draw rounds."""
     correct = 0
     total = 0
-    for winner, handicap, draw_cards in records:
+    for winner, handicap, draw_cards, stored_guess in records:
         if not winner or not guess_ready(draw_cards):
             continue
-        guess = race_guess(handicap, draw_cards)
+        guess = stored_guess or race_guess(handicap, draw_cards)
         if not guess:
             continue
         total += 1

@@ -15,6 +15,7 @@ from game_analyzer.race_values import (
     future_score,
     guess_accuracy,
     guess_ready,
+    lock_guess,
     pre_race_guess,
     pre_race_outcome,
     preview_guess,
@@ -28,7 +29,9 @@ from game_analyzer.race_values import (
 HANDICAP = (("AS", "KS", "QS"), ("2H", "3H", "4H"), ("6C", "8C", "9C"), ("10D", "JD", "QD"))
 ROUND1 = ("5H", "7S", "AD")
 ROUND2 = ("3C", "6D", "4S")
+ROUND3 = ("2C", "9H", "5S")
 SIX_DRAWS = ROUND1 + ROUND2
+NINE_DRAWS = SIX_DRAWS + ROUND3
 
 
 def test_full_suit_total_is_95():
@@ -117,9 +120,10 @@ def test_combined_scores_between_deck_and_track():
     assert scores["Diamonds"] > scores["Hearts"]
 
 
-def test_draws_for_guess_limits_two_rounds():
-    eight = SIX_DRAWS + ("2C", "9H")
-    assert len(draws_for_guess(eight)) == MAX_GUESS_DRAWS
+def test_draws_for_guess_uses_up_to_three_rounds():
+    twelve = NINE_DRAWS + ("4H", "6S", "8D")
+    assert len(draws_for_guess(twelve)) == MAX_GUESS_DRAWS == 9
+    assert len(draws_for_guess(SIX_DRAWS)) == 6
 
 
 def test_guess_not_ready_until_two_rounds():
@@ -144,27 +148,41 @@ def test_draws_from_per_round_frames():
 
 
 def test_all_draws_keeps_every_round():
-    round3 = ("2C", "9H", "5S")
     frames = [
         ("IN_PLAY", ROUND1),
         ("IN_PLAY", ROUND2),
-        ("IN_PLAY", round3),
+        ("IN_PLAY", ROUND3),
     ]
     all_draws = all_draws_from_in_play_frames(frames)
-    assert all_draws == SIX_DRAWS + round3
-    assert draws_from_in_play_frames(frames) == SIX_DRAWS
+    assert all_draws == NINE_DRAWS
+    assert draws_from_in_play_frames(frames) == NINE_DRAWS
 
 
 def test_guess_accuracy_requires_two_rounds():
     guess = race_guess(HANDICAP, SIX_DRAWS)
     records = [
-        ("HEARTS", HANDICAP, ROUND1),
-        (guess.upper(), HANDICAP, SIX_DRAWS),
-        ("CLUBS", HANDICAP, SIX_DRAWS),
+        ("HEARTS", HANDICAP, ROUND1, None),
+        (guess.upper(), HANDICAP, SIX_DRAWS, guess),
+        ("CLUBS", HANDICAP, SIX_DRAWS, None),
     ]
     stats = guess_accuracy(records)
     assert stats.total == 2
     assert stats.correct == 1
+
+
+def test_lock_guess_never_uses_winner():
+    locked = lock_guess(HANDICAP, SIX_DRAWS)
+    assert locked is not None
+    assert locked.suit == race_guess(HANDICAP, SIX_DRAWS)
+    assert len(locked.draw_cards) == 6
+    assert locked.draw_rounds == 2
+
+
+def test_lock_guess_includes_third_round_when_present():
+    locked = lock_guess(HANDICAP, NINE_DRAWS)
+    assert locked is not None
+    assert len(locked.draw_cards) == 9
+    assert locked.draw_rounds == 3
 
 
 def test_pre_race_outcome_after_two_rounds():

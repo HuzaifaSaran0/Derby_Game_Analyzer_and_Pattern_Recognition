@@ -113,10 +113,13 @@ def test_store_rebuilds_two_round_draws_from_frames(tmp_path: Path):
             phase=GamePhase.FINISHED,
             game_id="200",
             drawn_cards=SIX_DRAWS,
+            locked_guess="Diamonds",
+            locked_guess_draws=SIX_DRAWS,
+            locked_guess_rounds=2,
         ),
         _result(
             race_state=RaceState.FINISHED,
-            winner_suit=Suit.DIAMONDS,
+            winner_suit=Suit.CLUBS,
             handicap_cards=HANDICAP,
             draw_cards=ROUND2,
         ),
@@ -130,26 +133,31 @@ def test_store_rebuilds_two_round_draws_from_frames(tmp_path: Path):
     assert game.frames[1].draw_cards == ROUND1
     assert game.frames[2].draw_cards == ROUND2
     assert game.draw_cards == SIX_DRAWS
+    assert game.guess_suit == "Diamonds"
+    assert game.winner_suit == "CLUBS"
     outcome = store.pre_race_outcome_for("200")
     assert outcome is not None
     assert outcome.guess == "Diamonds"
-    assert outcome.correct is True
+    assert outcome.correct is False
 
 
-def test_store_keeps_all_draw_rounds_but_guesses_on_first_two(tmp_path: Path):
+def test_store_keeps_all_draw_rounds_and_uses_three_for_guess(tmp_path: Path):
     store = GameStore(tmp_path / "games.sqlite")
     shot = tmp_path / "001.png"
     shot.write_bytes(b"x")
     now = datetime(2026, 8, 18, 18, 0, 0)
     round3 = ("2C", "9H", "5S")
     all_nine = SIX_DRAWS + round3
+    from game_analyzer.race_values import race_guess
 
-    for seq, phase, round_cards, drawn in [
-        (1, GamePhase.DEALT, (), ()),
-        (2, GamePhase.IN_PLAY, ROUND1, ROUND1),
-        (3, GamePhase.IN_PLAY, ROUND2, SIX_DRAWS),
-        (4, GamePhase.IN_PLAY, round3, all_nine),
-        (5, GamePhase.FINISHED, round3, all_nine),
+    locked = race_guess(HANDICAP, all_nine)
+
+    for seq, phase, round_cards, drawn, lock in [
+        (1, GamePhase.DEALT, (), (), None),
+        (2, GamePhase.IN_PLAY, ROUND1, ROUND1, None),
+        (3, GamePhase.IN_PLAY, ROUND2, SIX_DRAWS, None),
+        (4, GamePhase.IN_PLAY, round3, all_nine, locked),
+        (5, GamePhase.FINISHED, round3, all_nine, locked),
     ]:
         store.record(
             _decision(
@@ -157,6 +165,9 @@ def test_store_keeps_all_draw_rounds_but_guesses_on_first_two(tmp_path: Path):
                 phase=phase,
                 game_id="300",
                 drawn_cards=drawn,
+                locked_guess=lock,
+                locked_guess_draws=all_nine if lock else (),
+                locked_guess_rounds=3 if lock else 0,
             ),
             _result(
                 race_state=RaceState.FINISHED if phase == GamePhase.FINISHED else RaceState.BETTING,
@@ -172,7 +183,8 @@ def test_store_keeps_all_draw_rounds_but_guesses_on_first_two(tmp_path: Path):
     game = store.get_game("300", root=tmp_path)
     assert game is not None
     assert game.draw_cards == all_nine
-    assert game.guess_draw_cards == SIX_DRAWS
+    assert game.guess_draw_cards == all_nine
+    assert game.guess_suit == locked
 
 
 def test_store_pre_race_guess_accuracy(tmp_path: Path):

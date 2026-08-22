@@ -68,15 +68,12 @@ class StoredGame:
     started_at: str
     finished_at: str | None
     winner_suit: str | None
+    guess_suit: str | None
     handicap_cards: tuple[tuple[str, ...], ...]
     draw_cards: tuple[str, ...]
+    guess_draw_cards: tuple[str, ...]
     table_cards: list
     frames: tuple[StoredFrame, ...]
-
-    @property
-    def guess_draw_cards(self) -> tuple[str, ...]:
-        """First two draw rounds — used for picking a winner."""
-        return draws_for_guess(self.draw_cards)
 
 
 def _stored_all_draws(
@@ -134,6 +131,14 @@ class GameStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as con:
             con.executescript(_SCHEMA)
+            self._ensure_guess_columns(con)
+
+    def _ensure_guess_columns(self, con: sqlite3.Connection) -> None:
+        columns = {row[1] for row in con.execute("PRAGMA table_info(games)")}
+        if "guess_suit" not in columns:
+            con.execute("ALTER TABLE games ADD COLUMN guess_suit TEXT")
+        if "guess_draws_json" not in columns:
+            con.execute("ALTER TABLE games ADD COLUMN guess_draws_json TEXT")
 
     def _connect(self, *, autocommit: bool = False) -> sqlite3.Connection:
         con = sqlite3.connect(str(self.path), timeout=10)
@@ -171,16 +176,22 @@ class GameStore:
         round_draws = list(result.draw_cards)
         winner = result.winner_suit.value if result.winner_suit else None
         finished = stamp if decision.phase.value == "FINISHED" else None
+        guess_suit = decision.locked_guess
+        guess_draws = list(decision.locked_guess_draws) if decision.locked_guess_draws else None
 
         with self._connect() as con:
+            self._ensure_guess_columns(con)
             con.execute(
                 """
                 INSERT INTO games (game_id, started_at, finished_at, winner_suit,
+                                   guess_suit, guess_draws_json,
                                    handicap_json, draws_json, table_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(game_id) DO UPDATE SET
                   finished_at=COALESCE(excluded.finished_at, games.finished_at),
                   winner_suit=COALESCE(excluded.winner_suit, games.winner_suit),
+                  guess_suit=COALESCE(excluded.guess_suit, games.guess_suit),
+                  guess_draws_json=COALESCE(excluded.guess_draws_json, games.guess_draws_json),
                   handicap_json=excluded.handicap_json,
                   draws_json=excluded.draws_json,
                   table_json=excluded.table_json
@@ -190,6 +201,8 @@ class GameStore:
                     stamp,
                     finished,
                     winner,
+                    guess_suit,
+                    _dumps(guess_draws) if guess_draws else None,
                     _dumps(handicap),
                     _dumps(cumulative_draws),
                     _dumps(table),
@@ -269,31 +282,51 @@ class GameStore:
             parse_draw_list(json.loads(game["draws_json"] or "[]")),
             frames,
         )
+        stored_guess_draws = parse_draw_list(json.loads(game["guess_draws_json"] or "[]"))
+        guess_draw_cards = stored_guess_draws or draws_for_guess(draw_cards)
         return StoredGame(
             game_id=game["game_id"],
             started_at=game["started_at"],
             finished_at=game["finished_at"],
             winner_suit=game["winner_suit"],
+            guess_suit=game["guess_suit"],
             handicap_cards=handicap,
             draw_cards=draw_cards,
+            guess_draw_cards=guess_draw_cards,
             table_cards=table,
             frames=frames,
         )
 
     def pre_race_guess_accuracy(self) -> GuessAccuracy:
-        records: list[tuple[str | None, tuple[tuple[str, ...], ...], tuple[str, ...]]] = []
+        records: list[
+            tuple[str | None, tuple[tuple[str, ...], ...], tuple[str, ...], str | None]
+        ] = []
         for game_id in self.list_game_ids():
             game = self.get_game(game_id)
             if game is None or not game.winner_suit:
                 continue
-            records.append((game.winner_suit, game.handicap_cards, game.guess_draw_cards))
+            records.append(
+                (
+                    game.winner_suit,
+                    game.handicap_cards,
+                    game.guess_draw_cards,
+                    game.guess_suit,
+                )
+            )
         return guess_accuracy(records)
 
     def pre_race_outcome_for(self, game_id: str) -> PreRaceOutcome | None:
         game = self.get_game(game_id)
         if game is None:
             return None
-        return pre_race_outcome(game.winner_suit, game.handicap_cards, game.guess_draw_cards)
+        rounds = len(game.guess_draw_cards) // 3 if game.guess_draw_cards else 0
+        return pre_race_outcome(
+            game.winner_suit,
+            game.handicap_cards,
+            game.guess_draw_cards,
+            locked_guess=game.guess_suit,
+            locked_draw_rounds=rounds,
+        )
 
     def repair_empty_draws(self) -> list[tuple[str, int]]:
         """Rebuild ``draws_json`` from saved IN_PLAY frames when the game row is empty."""

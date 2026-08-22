@@ -7,7 +7,7 @@ from PIL import Image
 
 from game_analyzer.config import load_config
 from game_analyzer.models import ExtractionResult, Suit
-from game_analyzer.race_values import race_snapshot
+from game_analyzer.race_values import race_snapshot, suits_match
 from game_analyzer.store import GameStore
 from game_analyzer.vision import draw_table_overlay, extract_real, read_image
 
@@ -24,7 +24,10 @@ class DemoApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Game Analyzer — your race screenshots")
-        self.geometry("900x860")
+        # Keep default size under typical laptop usable height (~738 on 1366x768).
+        # A minsize taller than the screen blocks the WM maximize button.
+        self.geometry("900x700")
+        self.minsize(800, 560)
         ctk.set_appearance_mode("dark")
 
         self.config_data = load_config()
@@ -37,6 +40,7 @@ class DemoApp(ctk.CTk):
         self.after_id = None
         self.last_session_text = "offline screenshot"
         self.last_table_cards = None
+        self._result_value_labels: list[ctk.CTkLabel] = []
 
         nav = ctk.CTkFrame(self)
         nav.pack(fill="x", padx=12, pady=(8, 4))
@@ -133,23 +137,25 @@ class DemoApp(ctk.CTk):
             cards.grid(row=0, column=1, sticky="w")
             self.card_row_frames[suit_name] = cards
 
-        # Fetched extraction — always visible under the screenshot.
         results = ctk.CTkFrame(self, fg_color=("#2b2b2b", "#1e1e1e"))
-        results.pack(fill="x", padx=12, pady=(0, 8))
+        results.pack(fill="x", padx=12, pady=(0, 6))
         ctk.CTkLabel(results, text="Fetched data", font=("Segoe UI", 13, "bold")).pack(
-            anchor="w", padx=12, pady=(8, 2)
+            anchor="w", padx=12, pady=(8, 4)
         )
         left = ctk.CTkFrame(results, fg_color="transparent")
-        left.pack(fill="x", padx=12, pady=(0, 10))
-        self.result_state = self._result_row(left, 0, "Race state")
-        self.result_winner = self._result_row(left, 1, "Winner")
-        self.result_phase = self._result_row(left, 2, "Game phase")
-        self.result_session = self._result_row(left, 3, "Session")
+        left.pack(fill="x", padx=12, pady=(0, 14))
+        self.result_state = self._result_row(left, "Race state")
+        self.result_guess = self._result_row(left, "Locked guess")
+        self.result_winner = self._result_row(left, "Winner (OCR)")
+        self.result_phase = self._result_row(left, "Game phase")
+        self.result_session = self._result_row(left, "Session")
 
-        self.status = ctk.CTkLabel(self, text="", font=("Consolas", 14), justify="left")
-        self.status.pack(padx=12, pady=6, anchor="w")
+        self.status = ctk.CTkLabel(
+            self, text="", font=("Consolas", 13), justify="left", anchor="w", wraplength=860
+        )
+        self.status.pack(fill="x", padx=12, pady=(0, 6))
 
-        self.log = ctk.CTkTextbox(self, height=140)
+        self.log = ctk.CTkTextbox(self, height=100)
         self.log.pack(fill="both", expand=True, padx=12, pady=(0, 12))
         self.log.insert(
             "end",
@@ -158,8 +164,19 @@ class DemoApp(ctk.CTk):
             "Saved live images are clean unless draw_overlays=true.\n\n",
         )
 
+        # add="+" keeps CustomTkinter's own <Configure> handler intact
+        self.bind("<Configure>", self._on_window_configure, add="+")
+
         if self.paths:
             self.show()
+
+    def _on_window_configure(self, event) -> None:
+        if event.widget is not self:
+            return
+        wrap = max(360, event.width - 48)
+        self.status.configure(wraplength=wrap)
+        for label in self._result_value_labels:
+            label.configure(wraplength=max(420, event.width - 180))
 
     def _refresh_guess_stats(self) -> None:
         stats = self.store.pre_race_guess_accuracy()
@@ -172,19 +189,31 @@ class DemoApp(ctk.CTk):
         self.guess_stats.configure(
             text=(
                 f"Guess accuracy: {stats.correct}/{stats.total} "
-                f"({stats.percent:.0f}%) — 25% future deck + 75% track after 2 rounds"
+                f"({stats.percent:.0f}%) — locked guess uses 2–3 draw rounds (never winner OCR)"
             ),
             text_color="#58a6ff" if stats.percent and stats.percent >= 50 else "#ff9f43",
         )
 
-    @staticmethod
-    def _result_row(parent: ctk.CTkFrame, row: int, title: str) -> ctk.CTkLabel:
-        ctk.CTkLabel(parent, text=f"{title}:", width=100, anchor="w", font=("Segoe UI", 13)).grid(
-            row=row, column=0, sticky="w", pady=2
+    def _result_row(self, parent: ctk.CTkFrame, title: str) -> ctk.CTkLabel:
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=2)
+        ctk.CTkLabel(
+            row,
+            text=f"{title}:",
+            width=110,
+            anchor="nw",
+            font=("Segoe UI", 13),
+        ).pack(side="left", anchor="n")
+        value = ctk.CTkLabel(
+            row,
+            text="—",
+            anchor="nw",
+            justify="left",
+            wraplength=760,
+            font=("Consolas", 14),
         )
-        value = ctk.CTkLabel(parent, text="—", anchor="w", justify="left", font=("Consolas", 15))
-        value.grid(row=row, column=1, sticky="ew", pady=2, padx=(8, 0))
-        parent.grid_columnconfigure(1, weight=1)
+        value.pack(side="left", fill="x", expand=True, padx=(8, 0), anchor="n")
+        self._result_value_labels.append(value)
         return value
 
     def _set_results(
@@ -192,6 +221,9 @@ class DemoApp(ctk.CTk):
         result: ExtractionResult,
         table_cards=None,
         drawn_cards: tuple[str, ...] = (),
+        locked_guess: str | None = None,
+        locked_guess_draws: tuple[str, ...] = (),
+        locked_guess_rounds: int = 0,
     ) -> None:
         winner = result.winner_suit.value.title() if result.winner_suit else "none yet"
         state = {
@@ -201,6 +233,17 @@ class DemoApp(ctk.CTk):
             "IN_PROGRESS": "In progress",
         }.get(result.race_state.value, result.race_state.value)
         self.result_state.configure(text=state)
+        if locked_guess:
+            rounds_note = f"after {locked_guess_rounds} rounds"
+            if result.winner_suit and suits_match(locked_guess, result.winner_suit.value):
+                guess_text = f"{locked_guess.title()} ({rounds_note}) — matches winner"
+            elif result.winner_suit:
+                guess_text = f"{locked_guess.title()} ({rounds_note}) — differs from winner"
+            else:
+                guess_text = f"{locked_guess.title()} ({rounds_note})"
+            self.result_guess.configure(text=guess_text)
+        else:
+            self.result_guess.configure(text="not locked yet (need 2 draw rounds)")
         self.result_winner.configure(text=winner)
         phase = result.game_phase()
         phase_text = {
@@ -211,13 +254,22 @@ class DemoApp(ctk.CTk):
         }.get(phase.value, phase.value)
         self.result_phase.configure(text=phase_text)
         self.result_session.configure(text=self.last_session_text)
-        self._render_remaining_values(result, drawn_cards)
+        self._render_remaining_values(
+            result,
+            drawn_cards,
+            locked_guess=locked_guess,
+            locked_guess_draws=locked_guess_draws,
+            locked_guess_rounds=locked_guess_rounds,
+        )
         self._render_card_table(result, table_cards)
 
     def _render_remaining_values(
         self,
         result: ExtractionResult,
         drawn_cards: tuple[str, ...] = (),
+        locked_guess: str | None = None,
+        locked_guess_draws: tuple[str, ...] = (),
+        locked_guess_rounds: int = 0,
     ) -> None:
         if not result.has_handicap_cards():
             for label in self.remaining_rows.values():
@@ -225,9 +277,11 @@ class DemoApp(ctk.CTk):
             self.remaining_favourite.configure(text="Handicap not visible yet.")
             return
 
-        snap = race_snapshot(result.handicap_cards, drawn_cards)
-        favourite = snap.guess if snap.guess_ready else None
+        guess_draws = locked_guess_draws if locked_guess_draws else drawn_cards
+        snap = race_snapshot(result.handicap_cards, guess_draws)
+        favourite = locked_guess if locked_guess else (snap.guess if snap.guess_ready else None)
         preview = snap.preview
+        rounds_label = locked_guess_rounds or snap.draw_rounds_used
         for suit_name, label in self.remaining_rows.items():
             deck = snap.deck_remaining.get(suit_name)
             if deck is None:
@@ -244,7 +298,7 @@ class DemoApp(ctk.CTk):
             is_preview = favourite is None and suit_name == preview and snap.draw_rounds_used > 0
             if snap.draw_rounds_used == 0:
                 text = f"deck {deck_p * 100:.0f}% · score {combined * 100:.0f}%"
-            elif snap.guess_ready:
+            elif favourite:
                 text = (
                     f"deck {deck_p * 100:.0f}% · track {track_p * 100:.0f}% · "
                     f"finish {expected_p * 100:.0f}% · combo {combo_p * 100:.0f}% · "
@@ -267,8 +321,9 @@ class DemoApp(ctk.CTk):
                 tw, fw, cw, sw = (int(w * 100) for w in snap.layer4_weights)
                 self.remaining_favourite.configure(
                     text=(
-                        f"Best chance: {favourite} "
-                        f"({tw}% track + {fw}% future + {cw}% combo + {sw}% pool share)"
+                        f"Locked guess: {favourite} after {rounds_label} rounds "
+                        f"({tw}% track + {fw}% future + {cw}% combo + {sw}% pool) — "
+                        f"independent of winner row"
                     ),
                     text_color=SUIT_STYLES[favourite]["color"],
                 )
@@ -419,7 +474,15 @@ class DemoApp(ctk.CTk):
         if frame is not None:
             self.last_table_cards = decision.table_cards
             rel = f"{path.parent.name}/{path.name}" if path else decision.reason
-            self.show_frame(frame, rel, table_cards=decision.table_cards, drawn_cards=decision.drawn_cards)
+            self.show_frame(
+                frame,
+                rel,
+                table_cards=decision.table_cards,
+                drawn_cards=decision.drawn_cards,
+                locked_guess=decision.locked_guess,
+                locked_guess_draws=decision.locked_guess_draws,
+                locked_guess_rounds=decision.locked_guess_rounds,
+            )
         else:
             self.result_session.configure(text=self.last_session_text)
         self._refresh_guess_stats()
@@ -436,6 +499,9 @@ class DemoApp(ctk.CTk):
         label: str,
         table_cards=None,
         drawn_cards: tuple[str, ...] = (),
+        locked_guess: str | None = None,
+        locked_guess_draws: tuple[str, ...] = (),
+        locked_guess_rounds: int = 0,
     ) -> None:
         result = extract_real(frame, self.config_data)
         if not drawn_cards and result.draw_cards:
@@ -445,12 +511,19 @@ class DemoApp(ctk.CTk):
             shown = draw_table_overlay(rgb, self.config_data, result)
         else:
             shown = rgb
-        image = Image.fromarray(shown).resize((640, 380))
-        photo = ctk.CTkImage(light_image=image, dark_image=image, size=(640, 380))
+        image = Image.fromarray(shown).resize((560, 300))
+        photo = ctk.CTkImage(light_image=image, dark_image=image, size=(560, 300))
         self.preview.configure(image=photo)
         self.preview.image = photo
 
-        self._set_results(result, table_cards, drawn_cards)
+        self._set_results(
+            result,
+            table_cards,
+            drawn_cards,
+            locked_guess=locked_guess,
+            locked_guess_draws=locked_guess_draws,
+            locked_guess_rounds=locked_guess_rounds,
+        )
 
         winner = result.winner_suit.value if result.winner_suit else "none"
         handicap = "|".join(",".join(row) for row in result.handicap_cards) if result.handicap_cards else "-"
