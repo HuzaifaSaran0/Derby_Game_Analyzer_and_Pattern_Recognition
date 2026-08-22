@@ -7,7 +7,7 @@ from PIL import Image
 
 from game_analyzer.config import load_config
 from game_analyzer.models import ExtractionResult, Suit
-from game_analyzer.race_values import favourite_suit, remaining_after_handicap
+from game_analyzer.race_values import race_snapshot
 from game_analyzer.store import GameStore
 from game_analyzer.vision import draw_table_overlay, extract_real, read_image
 
@@ -78,7 +78,7 @@ class DemoApp(ctk.CTk):
         remaining_panel.pack(fill="x", pady=(0, 8))
         ctk.CTkLabel(
             remaining_panel,
-            text="Remaining race value (95 − handicap)",
+            text="Win chance (deck % + track % blend)",
             font=("Segoe UI", 13, "bold"),
         ).pack(anchor="w", padx=12, pady=(10, 4))
         self.remaining_rows: dict[str, ctk.CTkLabel] = {}
@@ -165,14 +165,14 @@ class DemoApp(ctk.CTk):
         stats = self.store.pre_race_guess_accuracy()
         if stats.total == 0:
             self.guess_stats.configure(
-                text="Pre-race guess accuracy: no scored games yet (need a winner + readable handicap)",
+                text="Guess accuracy: no scored games yet (need winner + 2 draw rounds)",
                 text_color="#888888",
             )
             return
         self.guess_stats.configure(
             text=(
-                f"Pre-race guess accuracy: {stats.correct}/{stats.total} "
-                f"({stats.percent:.0f}%) — finished games only"
+                f"Guess accuracy: {stats.correct}/{stats.total} "
+                f"({stats.percent:.0f}%) — 25% deck + 75% track after 2 draw rounds"
             ),
             text_color="#58a6ff" if stats.percent and stats.percent >= 50 else "#ff9f43",
         )
@@ -187,7 +187,12 @@ class DemoApp(ctk.CTk):
         parent.grid_columnconfigure(1, weight=1)
         return value
 
-    def _set_results(self, result: ExtractionResult, table_cards=None) -> None:
+    def _set_results(
+        self,
+        result: ExtractionResult,
+        table_cards=None,
+        drawn_cards: tuple[str, ...] = (),
+    ) -> None:
         winner = result.winner_suit.value.title() if result.winner_suit else "none yet"
         state = {
             "FINISHED": "Race finished (winner highlighted)",
@@ -206,36 +211,75 @@ class DemoApp(ctk.CTk):
         }.get(phase.value, phase.value)
         self.result_phase.configure(text=phase_text)
         self.result_session.configure(text=self.last_session_text)
-        self._render_remaining_values(result)
+        self._render_remaining_values(result, drawn_cards)
         self._render_card_table(result, table_cards)
 
-    def _render_remaining_values(self, result: ExtractionResult) -> None:
+    def _render_remaining_values(
+        self,
+        result: ExtractionResult,
+        drawn_cards: tuple[str, ...] = (),
+    ) -> None:
         if not result.has_handicap_cards():
             for label in self.remaining_rows.values():
                 label.configure(text="—", text_color=("gray10", "gray90"))
             self.remaining_favourite.configure(text="Handicap not visible yet.")
             return
 
-        remaining = remaining_after_handicap(result.handicap_cards)
-        favourite = favourite_suit(remaining)
+        snap = race_snapshot(result.handicap_cards, drawn_cards)
+        favourite = snap.guess if snap.guess_ready else None
+        preview = snap.preview
         for suit_name, label in self.remaining_rows.items():
-            value = remaining.get(suit_name)
-            if value is None:
+            deck = snap.deck_remaining.get(suit_name)
+            if deck is None:
                 label.configure(text="?", text_color="#888888")
                 continue
-            is_best = suit_name == favourite
-            label.configure(
-                text=f"{value} pts",
-                text_color=SUIT_STYLES[suit_name]["color"] if is_best else ("gray10", "gray90"),
+            deck_p = snap.deck_pct.get(suit_name)
+            track_p = snap.track_pct.get(suit_name)
+            combined = snap.combined_score.get(suit_name)
+            is_best = suit_name == favourite or (
+                favourite is None and snap.draw_rounds_used == 0 and suit_name == preview
             )
+            is_preview = favourite is None and suit_name == preview and snap.draw_rounds_used > 0
+            text = (
+                f"deck {deck_p * 100:.0f}% · track {track_p * 100:.0f}% · "
+                f"score {combined * 100:.0f}%"
+            )
+            if is_best and favourite:
+                color = SUIT_STYLES[suit_name]["color"]
+            elif is_preview:
+                color = "#aaaaaa"
+            else:
+                color = ("gray10", "gray90")
+            label.configure(text=text, text_color=color)
         if favourite:
+            dw = int(snap.deck_weight * 100)
+            tw = int(snap.track_weight * 100)
             self.remaining_favourite.configure(
-                text=f"Best pre-race chance: {favourite} (highest remaining value)",
+                text=f"Best chance: {favourite} ({dw}% deck + {tw}% track)",
                 text_color=SUIT_STYLES[favourite]["color"],
+            )
+        elif snap.draw_rounds_used == 1 and preview:
+            self.remaining_favourite.configure(
+                text=(
+                    f"Round 1/2 — preview leader {preview} "
+                    f"(50% deck + 50% track). Need round 2 to lock guess."
+                ),
+                text_color="#888888",
+            )
+        elif snap.draw_rounds_used == 0 and preview:
+            self.remaining_favourite.configure(
+                text=f"Handicap preview: {preview} leads on deck (100% deck). Waiting for draw round 1.",
+                text_color="#888888",
+            )
+        elif snap.guess_ready is False and snap.draw_rounds_used > 0:
+            need = 2 - snap.draw_rounds_used
+            self.remaining_favourite.configure(
+                text=f"Round {snap.draw_rounds_used}/2 — need {need} more draw round(s) before guessing",
+                text_color="#888888",
             )
         else:
             self.remaining_favourite.configure(
-                text="Could not read all handicap cards.",
+                text="Could not read all handicap/draw cards.",
                 text_color="#888888",
             )
 
@@ -354,7 +398,7 @@ class DemoApp(ctk.CTk):
         if frame is not None:
             self.last_table_cards = decision.table_cards
             rel = f"{path.parent.name}/{path.name}" if path else decision.reason
-            self.show_frame(frame, rel, table_cards=decision.table_cards)
+            self.show_frame(frame, rel, table_cards=decision.table_cards, drawn_cards=decision.drawn_cards)
         else:
             self.result_session.configure(text=self.last_session_text)
         self._refresh_guess_stats()
@@ -365,8 +409,16 @@ class DemoApp(ctk.CTk):
         frame = read_image(path)
         self.show_frame(frame, f"{self.index + 1}/{len(self.paths)}  {path.name}")
 
-    def show_frame(self, frame, label: str, table_cards=None) -> None:
+    def show_frame(
+        self,
+        frame,
+        label: str,
+        table_cards=None,
+        drawn_cards: tuple[str, ...] = (),
+    ) -> None:
         result = extract_real(frame, self.config_data)
+        if not drawn_cards and result.draw_cards:
+            drawn_cards = tuple(result.draw_cards)
         rgb = frame[:, :, ::-1]
         if self.config_data.get("draw_overlays", False):
             shown = draw_table_overlay(rgb, self.config_data, result)
@@ -377,7 +429,7 @@ class DemoApp(ctk.CTk):
         self.preview.configure(image=photo)
         self.preview.image = photo
 
-        self._set_results(result, table_cards)
+        self._set_results(result, table_cards, drawn_cards)
 
         winner = result.winner_suit.value if result.winner_suit else "none"
         handicap = "|".join(",".join(row) for row in result.handicap_cards) if result.handicap_cards else "-"

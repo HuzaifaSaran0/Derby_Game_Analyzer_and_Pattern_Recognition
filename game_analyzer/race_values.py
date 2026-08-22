@@ -3,11 +3,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-"""Step 1: pre-race remaining points per suit after handicap cards are removed."""
+"""Race value helpers: deck points (95) and track distance (32)."""
 
 FULL_SUIT_TOTAL = 95  # one suit: A=11, 2–10 face, J/Q/K=10 → 95 total
+TRACK_LENGTH = 32  # first suit to reach 32 on draw cards wins
+GUESS_DRAW_ROUNDS = 2
+CARDS_PER_DRAW_ROUND = 3
+MAX_GUESS_DRAWS = GUESS_DRAW_ROUNDS * CARDS_PER_DRAW_ROUND
+
+# Option B: deck vs track blend by draw round (0–2).
+# Round 0 = handicap only, round 1 = preview, round 2 = official guess.
+BLEND_BY_ROUND: tuple[tuple[float, float], ...] = (
+    (1.0, 0.0),  # 0 draw rounds — deck only
+    (0.5, 0.5),  # 1 draw round — preview only
+    (0.25, 0.75),  # 2 draw rounds — official guess
+)
 
 SUIT_NAMES = ("Spades", "Hearts", "Clubs", "Diamonds")
+_SUIT_BY_LETTER = {"S": "Spades", "H": "Hearts", "C": "Clubs", "D": "Diamonds"}
 
 
 def card_race_value(card: str) -> int | None:
@@ -22,6 +35,12 @@ def card_race_value(card: str) -> int | None:
     if rank.isdigit():
         return int(rank)
     return None
+
+
+def suit_name_from_card(card: str) -> str | None:
+    if len(card) < 2:
+        return None
+    return _SUIT_BY_LETTER.get(card[-1].upper())
 
 
 def handicap_sums(handicap_cards: tuple[tuple[str, ...], ...]) -> dict[str, int | None]:
@@ -41,6 +60,63 @@ def handicap_sums(handicap_cards: tuple[tuple[str, ...], ...]) -> dict[str, int 
     return out
 
 
+def draw_sums_by_suit(draw_cards: tuple[str, ...]) -> dict[str, int | None]:
+    """How far each suit moved on the track (sum of its draw card values)."""
+    out: dict[str, int | None] = {suit: 0 for suit in SUIT_NAMES}
+    for card in draw_cards:
+        suit_name = suit_name_from_card(card)
+        if suit_name is None:
+            continue
+        value = card_race_value(card)
+        if value is None:
+            out[suit_name] = None
+            continue
+        if out[suit_name] is not None:
+            out[suit_name] += value
+    return out
+
+
+def draws_for_guess(draw_cards: tuple[str, ...]) -> tuple[str, ...]:
+    """Use draw cards from the first two rounds only (up to six cards)."""
+    return draw_cards[:MAX_GUESS_DRAWS]
+
+
+def draw_rounds_seen(draw_cards: tuple[str, ...]) -> int:
+    """How many full or partial draw rounds are in ``draw_cards`` (0–2)."""
+    return min(GUESS_DRAW_ROUNDS, len(draw_cards) // CARDS_PER_DRAW_ROUND)
+
+
+def guess_ready(draw_cards: tuple[str, ...]) -> bool:
+    """True once two draw rounds (six cards) are available."""
+    return len(draw_cards) >= MAX_GUESS_DRAWS
+
+
+def all_draws_from_in_play_frames(
+    frames: Iterable[tuple[str, tuple[str, ...]]],
+) -> tuple[str, ...]:
+    """Rebuild every draw round from saved IN_PLAY frames (handles per-round or cumulative rows)."""
+    ordered: list[str] = []
+    for phase, cards in frames:
+        if phase != "IN_PLAY" or not cards:
+            continue
+        if (
+            ordered
+            and len(cards) >= len(ordered)
+            and tuple(cards[: len(ordered)]) == tuple(ordered)
+        ):
+            ordered.extend(cards[len(ordered) :])
+        else:
+            ordered.extend(cards)
+    return tuple(ordered)
+
+
+def draws_from_in_play_frames(
+    frames: Iterable[tuple[str, tuple[str, ...]]],
+) -> tuple[str, ...]:
+    """First two draw rounds from saved IN_PLAY frames."""
+    return draws_for_guess(all_draws_from_in_play_frames(frames))
+
+
 def remaining_after_handicap(handicap_cards: tuple[tuple[str, ...], ...]) -> dict[str, int | None]:
     """Points still in each suit's deck: 95 minus handicap sum."""
     removed = handicap_sums(handicap_cards)
@@ -50,21 +126,117 @@ def remaining_after_handicap(handicap_cards: tuple[tuple[str, ...], ...]) -> dic
     }
 
 
+def remaining_deck(
+    handicap_cards: tuple[tuple[str, ...], ...],
+    draw_cards: tuple[str, ...] = (),
+) -> dict[str, int | None]:
+    """Deck points left: 95 minus handicap and draw sums for each suit."""
+    removed_h = handicap_sums(handicap_cards)
+    removed_d = draw_sums_by_suit(draws_for_guess(draw_cards))
+    out: dict[str, int | None] = {}
+    for suit in SUIT_NAMES:
+        h = removed_h[suit]
+        d = removed_d[suit]
+        if h is None or d is None:
+            out[suit] = None
+        else:
+            out[suit] = FULL_SUIT_TOTAL - h - d
+    return out
+
+
+def track_position(draw_cards: tuple[str, ...]) -> dict[str, int | None]:
+    """Distance each suit has moved toward 32 (draw cards only)."""
+    return draw_sums_by_suit(draws_for_guess(draw_cards))
+
+
+def track_distance_to_go(draw_cards: tuple[str, ...]) -> dict[str, int | None]:
+    """How many track points each suit still needs to reach 32."""
+    moved = track_position(draw_cards)
+    return {
+        suit: (TRACK_LENGTH - value if value is not None else None)
+        for suit, value in moved.items()
+    }
+
+
+def blend_weights(draw_rounds: int) -> tuple[float, float]:
+    """Return (deck_weight, track_weight) for 0–2 draw rounds seen."""
+    idx = min(max(draw_rounds, 0), len(BLEND_BY_ROUND) - 1)
+    return BLEND_BY_ROUND[idx]
+
+
+def deck_score(deck_remaining: dict[str, int | None]) -> dict[str, float | None]:
+    """Deck strength 0–1: points left divided by 95."""
+    return {
+        suit: (value / FULL_SUIT_TOTAL if value is not None else None)
+        for suit, value in deck_remaining.items()
+    }
+
+
+def track_score(track_moved: dict[str, int | None]) -> dict[str, float | None]:
+    """Track progress 0–1: distance moved toward 32."""
+    return {
+        suit: (value / TRACK_LENGTH if value is not None else None)
+        for suit, value in track_moved.items()
+    }
+
+
+def combined_scores(
+    handicap_cards: tuple[tuple[str, ...], ...],
+    draw_cards: tuple[str, ...] = (),
+) -> dict[str, float | None]:
+    """Blend deck + track scores using weights for current draw round."""
+    rounds = draw_rounds_seen(draw_cards)
+    deck_w, track_w = blend_weights(rounds)
+    deck = deck_score(remaining_deck(handicap_cards, draw_cards))
+    track = track_score(track_position(draw_cards))
+    out: dict[str, float | None] = {}
+    for suit in SUIT_NAMES:
+        d = deck[suit]
+        t = track[suit]
+        if d is None or t is None:
+            out[suit] = None
+        else:
+            out[suit] = deck_w * d + track_w * t
+    return out
+
+
+def favourite_combined(scores: dict[str, float | None]) -> str | None:
+    ranked = [(s, v) for s, v in scores.items() if v is not None]
+    if len(ranked) < 4:
+        return None
+    return max(ranked, key=lambda t: t[1])[0]
+
+
 def favourite_suit(remaining: dict[str, int | None]) -> str | None:
-    """Suit with the highest remaining value — best pre-race chance."""
+    """Suit with the highest remaining deck value — best chance to win."""
     ranked = [(s, v) for s, v in remaining.items() if v is not None]
     if len(ranked) < 4:
         return None
     best = max(ranked, key=lambda t: t[1])
-    if any(v == best[1] for s, v in ranked if s != best[0]):
-        # Tie — still return one favourite; UI can mention tie if needed.
-        pass
     return best[0]
 
 
+def race_guess(
+    handicap_cards: tuple[tuple[str, ...], ...],
+    draw_cards: tuple[str, ...] = (),
+) -> str | None:
+    """Official pick after two draw rounds (25% deck + 75% track)."""
+    if not guess_ready(draw_cards):
+        return None
+    return favourite_combined(combined_scores(handicap_cards, draw_cards))
+
+
+def preview_guess(
+    handicap_cards: tuple[tuple[str, ...], ...],
+    draw_cards: tuple[str, ...] = (),
+) -> str | None:
+    """Leading suit from the current blend (including handicap-only preview)."""
+    return favourite_combined(combined_scores(handicap_cards, draw_cards))
+
+
 def pre_race_guess(handicap_cards: tuple[tuple[str, ...], ...]) -> str | None:
-    """Pre-race pick: suit with the most points left after handicap."""
-    return favourite_suit(remaining_after_handicap(handicap_cards))
+    """Handicap-only pick (100% deck)."""
+    return preview_guess(handicap_cards, ())
 
 
 def suits_match(a: str | None, b: str | None) -> bool:
@@ -77,26 +249,92 @@ def parse_handicap_rows(rows) -> tuple[tuple[str, ...], ...]:
     return tuple(tuple(row) for row in rows)
 
 
+def parse_draw_list(rows) -> tuple[str, ...]:
+    return tuple(rows)
+
+
+@dataclass(frozen=True)
+class RaceSnapshot:
+    deck_remaining: dict[str, int | None]
+    track_moved: dict[str, int | None]
+    track_to_go: dict[str, int | None]
+    deck_pct: dict[str, float | None]
+    track_pct: dict[str, float | None]
+    combined_score: dict[str, float | None]
+    deck_weight: float
+    track_weight: float
+    guess: str | None
+    preview: str | None
+    draw_rounds_used: int
+    guess_ready: bool
+
+
+def race_snapshot(
+    handicap_cards: tuple[tuple[str, ...], ...],
+    draw_cards: tuple[str, ...] = (),
+) -> RaceSnapshot:
+    rounds = draw_rounds_seen(draw_cards)
+    ready = guess_ready(draw_cards)
+    deck_rem = remaining_deck(handicap_cards, draw_cards)
+    moved = track_position(draw_cards)
+    deck_p = deck_score(deck_rem)
+    track_p = track_score(moved)
+    combined = combined_scores(handicap_cards, draw_cards)
+    deck_w, track_w = blend_weights(rounds)
+    return RaceSnapshot(
+        deck_remaining=deck_rem,
+        track_moved=moved,
+        track_to_go=track_distance_to_go(draw_cards),
+        deck_pct=deck_p,
+        track_pct=track_p,
+        combined_score=combined,
+        deck_weight=deck_w,
+        track_weight=track_w,
+        guess=race_guess(handicap_cards, draw_cards),
+        preview=preview_guess(handicap_cards, draw_cards),
+        draw_rounds_used=rounds,
+        guess_ready=ready,
+    )
+
+
 @dataclass(frozen=True)
 class PreRaceOutcome:
     guess: str | None
     winner: str | None
     correct: bool | None
+    draw_rounds_used: int = 0
+    guess_ready: bool = False
 
 
 def pre_race_outcome(
     winner_suit: str | None,
     handicap_cards: tuple[tuple[str, ...], ...],
+    draw_cards: tuple[str, ...] = (),
 ) -> PreRaceOutcome:
-    guess = pre_race_guess(handicap_cards)
+    snapshot = race_snapshot(handicap_cards, draw_cards)
+    guess = snapshot.guess
     if not winner_suit:
-        return PreRaceOutcome(guess=guess, winner=None, correct=None)
+        return PreRaceOutcome(
+            guess=guess,
+            winner=None,
+            correct=None,
+            draw_rounds_used=snapshot.draw_rounds_used,
+            guess_ready=snapshot.guess_ready,
+        )
     if not guess:
-        return PreRaceOutcome(guess=None, winner=winner_suit, correct=None)
+        return PreRaceOutcome(
+            guess=None,
+            winner=winner_suit,
+            correct=None,
+            draw_rounds_used=snapshot.draw_rounds_used,
+            guess_ready=snapshot.guess_ready,
+        )
     return PreRaceOutcome(
         guess=guess,
         winner=winner_suit,
         correct=suits_match(guess, winner_suit),
+        draw_rounds_used=snapshot.draw_rounds_used,
+        guess_ready=snapshot.guess_ready,
     )
 
 
@@ -113,15 +351,15 @@ class GuessAccuracy:
 
 
 def guess_accuracy(
-    records: Iterable[tuple[str | None, tuple[tuple[str, ...], ...]]],
+    records: Iterable[tuple[str | None, tuple[tuple[str, ...], ...], tuple[str, ...]]],
 ) -> GuessAccuracy:
-    """Score pre-race picks on finished games only (caller passes rows with winners)."""
+    """Score picks on finished games with two draw rounds and a readable guess."""
     correct = 0
     total = 0
-    for winner, handicap in records:
-        if not winner:
+    for winner, handicap, draw_cards in records:
+        if not winner or not guess_ready(draw_cards):
             continue
-        guess = pre_race_guess(handicap)
+        guess = race_guess(handicap, draw_cards)
         if not guess:
             continue
         total += 1

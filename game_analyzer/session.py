@@ -53,6 +53,7 @@ class SessionDecision:
     # True when next_wait_seconds came from the on-page circle (anchor sleep to timer sample).
     wait_from_live_timer: bool = False
     table_cards: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    drawn_cards: tuple[str, ...] = ()
 
     def folder_name(self) -> str:
         if self.recording and self.session_id:
@@ -129,6 +130,7 @@ class GameSessionTracker:
             game_id=game_id,
             peek_id_only=peek,
             table_cards=self._table_cards(),
+            drawn_cards=tuple(self.drawn_cards),
         )
 
     def _begin_game(
@@ -178,6 +180,7 @@ class GameSessionTracker:
             game_id=game_id,
             wait_from_live_timer=from_timer,
             table_cards=self._table_cards(),
+            drawn_cards=tuple(self.drawn_cards),
         )
 
     def _padded_timer_wait(self, timer_seconds: int) -> float:
@@ -300,6 +303,7 @@ class GameSessionTracker:
                 wait_mode=WaitMode.POLL_GAME_ID,
                 game_id=game_id or self.session_game_id,
                 table_cards=self._table_cards(),
+                drawn_cards=tuple(self.drawn_cards),
             )
 
         if phase == GamePhase.START:
@@ -316,6 +320,7 @@ class GameSessionTracker:
                 game_id=game_id or self.session_game_id,
                 wait_from_live_timer=from_timer,
                 table_cards=self._table_cards(),
+                drawn_cards=tuple(self.drawn_cards),
             )
 
         if fingerprint == self._last_fingerprint:
@@ -330,6 +335,7 @@ class GameSessionTracker:
                 wait_mode=WaitMode.FIXED,
                 game_id=game_id or self.session_game_id,
                 table_cards=self._table_cards(),
+                drawn_cards=tuple(self.drawn_cards),
             )
 
         self._ingest_cards(result)
@@ -347,4 +353,5 @@ class GameSessionTracker:
             watch_result=phase == GamePhase.IN_PLAY,
             game_id=game_id or self.session_game_id,
             table_cards=self._table_cards(),
+            drawn_cards=tuple(self.drawn_cards),
         )

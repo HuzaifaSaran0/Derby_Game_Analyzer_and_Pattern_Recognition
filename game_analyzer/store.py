@@ -7,7 +7,16 @@ from datetime import datetime
 from pathlib import Path
 
 from game_analyzer.models import ExtractionResult
-from game_analyzer.race_values import GuessAccuracy, PreRaceOutcome, guess_accuracy, parse_handicap_rows, pre_race_outcome
+from game_analyzer.race_values import (
+    GuessAccuracy,
+    PreRaceOutcome,
+    all_draws_from_in_play_frames,
+    draws_for_guess,
+    guess_accuracy,
+    parse_draw_list,
+    parse_handicap_rows,
+    pre_race_outcome,
+)
 from game_analyzer.session import SessionDecision
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,6 +58,7 @@ class StoredFrame:
     phase: str
     captured_at: str
     screenshot_path: Path
+    draw_cards: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -58,8 +68,27 @@ class StoredGame:
     finished_at: str | None
     winner_suit: str | None
     handicap_cards: tuple[tuple[str, ...], ...]
+    draw_cards: tuple[str, ...]
     table_cards: list
     frames: tuple[StoredFrame, ...]
+
+    @property
+    def guess_draw_cards(self) -> tuple[str, ...]:
+        """First two draw rounds — used for picking a winner."""
+        return draws_for_guess(self.draw_cards)
+
+
+def _stored_all_draws(
+    draw_cards: tuple[str, ...],
+    frames: tuple[StoredFrame, ...],
+) -> tuple[str, ...]:
+    """Every draw card saved for this game (all rounds)."""
+    from_frames = all_draws_from_in_play_frames((f.phase, f.draw_cards) for f in frames)
+    if from_frames and len(from_frames) > len(draw_cards):
+        return from_frames
+    if draw_cards:
+        return draw_cards
+    return from_frames
 
 
 def _dumps(value) -> str:
@@ -106,7 +135,8 @@ class GameStore:
         stamp = captured_at.isoformat(timespec="seconds")
         table = [[suit, list(cards)] for suit, cards in decision.table_cards]
         handicap = [list(row) for row in result.handicap_cards]
-        draws = list(result.draw_cards)
+        cumulative_draws = list(decision.drawn_cards) if decision.drawn_cards else list(result.draw_cards)
+        round_draws = list(result.draw_cards)
         winner = result.winner_suit.value if result.winner_suit else None
         finished = stamp if decision.phase.value == "FINISHED" else None
 
@@ -129,7 +159,7 @@ class GameStore:
                     finished,
                     winner,
                     _dumps(handicap),
-                    _dumps(draws),
+                    _dumps(cumulative_draws),
                     _dumps(table),
                 ),
             )
@@ -151,7 +181,7 @@ class GameStore:
                     decision.phase.value,
                     stamp,
                     str(rel),
-                    _dumps(draws),
+                    _dumps(round_draws),
                     _dumps(handicap),
                 ),
             )
@@ -185,8 +215,8 @@ class GameStore:
             if game is None:
                 return None
             frame_rows = con.execute(
-                "SELECT seq, phase, captured_at, screenshot_path FROM frames "
-                "WHERE game_id = ? ORDER BY seq ASC",
+                "SELECT seq, phase, captured_at, screenshot_path, draw_cards_json "
+                "FROM frames WHERE game_id = ? ORDER BY seq ASC",
                 (game_id,),
             ).fetchall()
         frames = tuple(
@@ -197,34 +227,38 @@ class GameStore:
                 screenshot_path=(root / row["screenshot_path"])
                 if not Path(row["screenshot_path"]).is_absolute()
                 else Path(row["screenshot_path"]),
+                draw_cards=parse_draw_list(json.loads(row["draw_cards_json"] or "[]")),
             )
             for row in frame_rows
         )
         table = json.loads(game["table_json"] or "[]")
         handicap = parse_handicap_rows(json.loads(game["handicap_json"] or "[]"))
+        draw_cards = _stored_all_draws(
+            parse_draw_list(json.loads(game["draws_json"] or "[]")),
+            frames,
+        )
         return StoredGame(
             game_id=game["game_id"],
             started_at=game["started_at"],
             finished_at=game["finished_at"],
             winner_suit=game["winner_suit"],
             handicap_cards=handicap,
+            draw_cards=draw_cards,
             table_cards=table,
             frames=frames,
         )
 
     def pre_race_guess_accuracy(self) -> GuessAccuracy:
-        with self._connect(autocommit=True) as con:
-            rows = con.execute(
-                "SELECT winner_suit, handicap_json FROM games WHERE winner_suit IS NOT NULL"
-            ).fetchall()
-        records = [
-            (row["winner_suit"], parse_handicap_rows(json.loads(row["handicap_json"] or "[]")))
-            for row in rows
-        ]
+        records: list[tuple[str | None, tuple[tuple[str, ...], ...], tuple[str, ...]]] = []
+        for game_id in self.list_game_ids():
+            game = self.get_game(game_id)
+            if game is None or not game.winner_suit:
+                continue
+            records.append((game.winner_suit, game.handicap_cards, game.guess_draw_cards))
         return guess_accuracy(records)
 
     def pre_race_outcome_for(self, game_id: str) -> PreRaceOutcome | None:
         game = self.get_game(game_id)
         if game is None:
             return None
-        return pre_race_outcome(game.winner_suit, game.handicap_cards)
+        return pre_race_outcome(game.winner_suit, game.handicap_cards, game.guess_draw_cards)

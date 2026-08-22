@@ -91,11 +91,15 @@ class HistoryWindow(ctk.CTkToplevel):
         self.header.configure(text=f"{self.index + 1}/{len(self.game_ids)}  Game ID {game.game_id}")
         winner = game.winner_suit.title() if game.winner_suit else "none yet"
         self.winner_label.configure(text=f"Winner: {winner}")
-        outcome = pre_race_outcome(game.winner_suit, game.handicap_cards)
-        self.guess_label.configure(text=self._guess_text(outcome))
+        outcome = pre_race_outcome(game.winner_suit, game.handicap_cards, game.guess_draw_cards)
+        self.guess_label.configure(text=self._guess_text(outcome, winner))
+        draw_note = (
+            f"draws saved {len(game.draw_cards)}"
+            f" ({len(game.guess_draw_cards)} used for guess)"
+        )
         self.meta_label.configure(
             text=f"started {game.started_at}    finished {game.finished_at or '—'}    "
-            f"screenshots {len(game.frames)}"
+            f"screenshots {len(game.frames)}    {draw_note}"
         )
         self._clear_shots()
         if not game.frames:
@@ -117,15 +121,22 @@ class HistoryWindow(ctk.CTkToplevel):
                 ctk.CTkLabel(cell, text=f"missing file: {path.name}").pack(anchor="w")
 
     @staticmethod
-    def _guess_text(outcome) -> str:
+    def _guess_text(outcome, winner_title: str) -> str:
+        if not outcome.guess_ready:
+            if outcome.draw_rounds_used:
+                return (
+                    f"Guess: — (round {outcome.draw_rounds_used}/2 saved — need 2 draw rounds)"
+                )
+            return "Guess: — (no draw rounds saved yet)"
+
         if outcome.guess is None:
             if outcome.winner:
-                return "Guess: — (handicap not fully readable)"
-            return "Guess: — (no finished winner yet)"
+                return "Guess: — (cards not fully readable)"
+            return f"Guess: — (after 2 draw rounds, waiting for winner)"
+
         guess = outcome.guess.title()
         if outcome.winner is None:
-            return f"Guess: {guess} (waiting for winner)"
+            return f"Guess: {guess} (after 2 draw rounds) — waiting for winner"
         if outcome.correct:
-            return f"Guess: {guess}  ✓ correct"
-        won = outcome.winner.title()
-        return f"Guess: {guess}  ✗ wrong (won {won})"
+            return f"Guess: {guess}  ✓ correct (winner: {winner_title})"
+        return f"Guess: {guess}  ✗ wrong (winner: {winner_title})"
