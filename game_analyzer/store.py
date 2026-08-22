@@ -11,6 +11,7 @@ from game_analyzer.race_values import (
     GuessAccuracy,
     PreRaceOutcome,
     all_draws_from_in_play_frames,
+    card_race_value,
     draws_for_guess,
     guess_accuracy,
     parse_draw_list,
@@ -89,6 +90,37 @@ def _stored_all_draws(
     if draw_cards:
         return draw_cards
     return from_frames
+
+
+@dataclass(frozen=True)
+class CleanupReport:
+    games_before: int
+    frames_before: int
+    games_after: int
+    frames_after: int
+    repaired_draws: tuple[tuple[str, int], ...]
+    deleted: tuple[tuple[str, str], ...]
+
+    @property
+    def deleted_count(self) -> int:
+        return len(self.deleted)
+
+    @property
+    def repaired_count(self) -> int:
+        return len(self.repaired_draws)
+
+
+def _handicap_quality(handicap_json: str) -> str:
+    handicap = parse_handicap_rows(json.loads(handicap_json or "[]"))
+    if len(handicap) < 4:
+        return "incomplete_rows"
+    for row in handicap:
+        if len(row) < 3:
+            return "short_row"
+        for card in row:
+            if not card or str(card).startswith("?") or card_race_value(card) is None:
+                return "unreadable"
+    return "ok"
 
 
 def _dumps(value) -> str:
@@ -262,3 +294,67 @@ class GameStore:
         if game is None:
             return None
         return pre_race_outcome(game.winner_suit, game.handicap_cards, game.guess_draw_cards)
+
+    def repair_empty_draws(self) -> list[tuple[str, int]]:
+        """Rebuild ``draws_json`` from saved IN_PLAY frames when the game row is empty."""
+        repaired: list[tuple[str, int]] = []
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT game_id, draws_json FROM games WHERE winner_suit IS NOT NULL"
+            ).fetchall()
+            for row in rows:
+                draws = parse_draw_list(json.loads(row["draws_json"] or "[]"))
+                if draws:
+                    continue
+                frame_rows = con.execute(
+                    "SELECT phase, draw_cards_json FROM frames WHERE game_id=? ORDER BY seq",
+                    (row["game_id"],),
+                ).fetchall()
+                rebuilt = all_draws_from_in_play_frames(
+                    (
+                        frame["phase"],
+                        parse_draw_list(json.loads(frame["draw_cards_json"] or "[]")),
+                    )
+                    for frame in frame_rows
+                )
+                if not rebuilt:
+                    continue
+                con.execute(
+                    "UPDATE games SET draws_json=? WHERE game_id=?",
+                    (_dumps(list(rebuilt)), row["game_id"]),
+                )
+                repaired.append((row["game_id"], len(rebuilt)))
+        return repaired
+
+    def cleanup_sensible(self) -> CleanupReport:
+        """Drop abandoned games and finished rows with unreadable/incomplete handicap."""
+        with self._connect() as con:
+            games_before = con.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+            frames_before = con.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
+
+        repaired = tuple(self.repair_empty_draws())
+        deleted: list[tuple[str, str]] = []
+        with self._connect() as con:
+            for row in con.execute(
+                "SELECT game_id, winner_suit, handicap_json FROM games"
+            ).fetchall():
+                if row["winner_suit"] is None:
+                    reason = "abandoned"
+                elif _handicap_quality(row["handicap_json"]) != "ok":
+                    reason = f"broken_handicap:{_handicap_quality(row['handicap_json'])}"
+                else:
+                    continue
+                game_id = row["game_id"]
+                con.execute("DELETE FROM frames WHERE game_id=?", (game_id,))
+                con.execute("DELETE FROM games WHERE game_id=?", (game_id,))
+                deleted.append((game_id, reason))
+            games_after = con.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+            frames_after = con.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
+        return CleanupReport(
+            games_before=games_before,
+            frames_before=frames_before,
+            games_after=games_after,
+            frames_after=frames_after,
+            repaired_draws=repaired,
+            deleted=tuple(deleted),
+        )

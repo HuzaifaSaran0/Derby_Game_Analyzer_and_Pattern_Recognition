@@ -94,8 +94,9 @@ class HistoryWindow(ctk.CTkToplevel):
         outcome = pre_race_outcome(game.winner_suit, game.handicap_cards, game.guess_draw_cards)
         self.guess_label.configure(text=self._guess_text(outcome, winner))
         draw_note = (
-            f"draws saved {len(game.draw_cards)}"
-            f" ({len(game.guess_draw_cards)} used for guess)"
+            f"draws saved {len(game.draw_cards)} total"
+            f" · guess uses first {len(game.guess_draw_cards)}"
+            f" · winner-round cards kept for history only"
         )
         self.meta_label.configure(
             text=f"started {game.started_at}    finished {game.finished_at or '—'}    "

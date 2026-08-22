@@ -240,3 +240,51 @@ def test_store_skips_waiting_frames(tmp_path: Path):
         root=tmp_path,
     )
     assert store.list_game_ids() == []
+
+
+def test_store_cleanup_sensible(tmp_path: Path):
+    store = GameStore(tmp_path / "games.sqlite")
+    shot = tmp_path / "001.png"
+    shot.write_bytes(b"x")
+    now = datetime(2026, 8, 18, 18, 0, 0)
+
+    store.record(
+        _decision(seq=1, phase=GamePhase.DEALT, game_id="abandoned"),
+        _result(handicap_cards=HANDICAP),
+        shot,
+        now,
+        root=tmp_path,
+    )
+    store.record(
+        _decision(seq=1, phase=GamePhase.FINISHED, game_id="broken"),
+        _result(
+            race_state=RaceState.FINISHED,
+            winner_suit=Suit.HEARTS,
+            handicap_cards=(("AS", "KS", "QS"), ("2H", "3H", "4H"), ("6C", "8C", "9C")),
+        ),
+        shot,
+        now,
+        root=tmp_path,
+    )
+    store.record(
+        _decision(
+            seq=1,
+            phase=GamePhase.FINISHED,
+            game_id="good",
+            drawn_cards=SIX_DRAWS,
+        ),
+        _result(
+            race_state=RaceState.FINISHED,
+            winner_suit=Suit.DIAMONDS,
+            handicap_cards=HANDICAP,
+            draw_cards=ROUND2,
+        ),
+        shot,
+        now,
+        root=tmp_path,
+    )
+
+    report = store.cleanup_sensible()
+    assert report.deleted_count == 2
+    assert store.list_game_ids() == ["good"]
+    assert report.games_after == 1
