@@ -5,6 +5,7 @@ from pathlib import Path
 import customtkinter as ctk
 from PIL import Image
 
+from game_analyzer.race_values import pre_race_outcome
 from game_analyzer.store import GameStore
 
 THUMB = (280, 168)
@@ -39,6 +40,10 @@ class HistoryWindow(ctk.CTkToplevel):
             info, text="Winner: —", font=("Segoe UI", 18, "bold"), anchor="w"
         )
         self.winner_label.pack(fill="x", padx=12, pady=(10, 2))
+        self.guess_label = ctk.CTkLabel(
+            info, text="Guess: —", font=("Segoe UI", 16), anchor="w"
+        )
+        self.guess_label.pack(fill="x", padx=12, pady=(0, 2))
         self.meta_label = ctk.CTkLabel(
             info, text="", font=("Consolas", 13), anchor="w", justify="left"
         )
@@ -54,6 +59,7 @@ class HistoryWindow(ctk.CTkToplevel):
         if not self.game_ids:
             self.header.configure(text="No saved games yet")
             self.winner_label.configure(text="Winner: —")
+            self.guess_label.configure(text="Guess: —")
             self.meta_label.configure(text="Capture a complete game first.")
             self._clear_shots()
             return
@@ -85,6 +91,8 @@ class HistoryWindow(ctk.CTkToplevel):
         self.header.configure(text=f"{self.index + 1}/{len(self.game_ids)}  Game ID {game.game_id}")
         winner = game.winner_suit.title() if game.winner_suit else "none yet"
         self.winner_label.configure(text=f"Winner: {winner}")
+        outcome = pre_race_outcome(game.winner_suit, game.handicap_cards)
+        self.guess_label.configure(text=self._guess_text(outcome))
         self.meta_label.configure(
             text=f"started {game.started_at}    finished {game.finished_at or '—'}    "
             f"screenshots {len(game.frames)}"
@@ -107,3 +115,17 @@ class HistoryWindow(ctk.CTkToplevel):
                 ctk.CTkLabel(cell, image=photo, text="").pack(anchor="w", pady=(4, 0))
             else:
                 ctk.CTkLabel(cell, text=f"missing file: {path.name}").pack(anchor="w")
+
+    @staticmethod
+    def _guess_text(outcome) -> str:
+        if outcome.guess is None:
+            if outcome.winner:
+                return "Guess: — (handicap not fully readable)"
+            return "Guess: — (no finished winner yet)"
+        guess = outcome.guess.title()
+        if outcome.winner is None:
+            return f"Guess: {guess} (waiting for winner)"
+        if outcome.correct:
+            return f"Guess: {guess}  ✓ correct"
+        won = outcome.winner.title()
+        return f"Guess: {guess}  ✗ wrong (won {won})"

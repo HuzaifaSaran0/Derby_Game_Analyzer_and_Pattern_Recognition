@@ -7,6 +7,8 @@ from PIL import Image
 
 from game_analyzer.config import load_config
 from game_analyzer.models import ExtractionResult, Suit
+from game_analyzer.race_values import favourite_suit, remaining_after_handicap
+from game_analyzer.store import GameStore
 from game_analyzer.vision import draw_table_overlay, extract_real, read_image
 
 REAL_DIR_NAME = "fixtures/real"
@@ -27,6 +29,7 @@ class DemoApp(ctk.CTk):
 
         self.config_data = load_config()
         root = Path(__file__).resolve().parent.parent
+        self.store = GameStore(root=root)
         self.paths = sorted((root / REAL_DIR_NAME).glob("*.png"))
         self.index = 0
 
@@ -50,6 +53,16 @@ class DemoApp(ctk.CTk):
         self.file_label = ctk.CTkLabel(nav, text="", font=("Consolas", 14))
         self.file_label.pack(side="left", padx=12)
 
+        self.guess_stats = ctk.CTkLabel(
+            self,
+            text="",
+            font=("Segoe UI", 14),
+            anchor="w",
+            justify="left",
+        )
+        self.guess_stats.pack(fill="x", padx=12, pady=(0, 4))
+        self._refresh_guess_stats()
+
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.pack(fill="x", padx=12, pady=(8, 4))
         top.grid_columnconfigure(0, weight=1)
@@ -58,8 +71,44 @@ class DemoApp(ctk.CTk):
         self.preview = ctk.CTkLabel(top, text="")
         self.preview.grid(row=0, column=0, sticky="nw", padx=(0, 12))
 
-        table_panel = ctk.CTkFrame(top, fg_color=("#252525", "#181818"), corner_radius=8)
-        table_panel.grid(row=0, column=1, sticky="ne")
+        right_col = ctk.CTkFrame(top, fg_color="transparent")
+        right_col.grid(row=0, column=1, sticky="ne")
+
+        remaining_panel = ctk.CTkFrame(right_col, fg_color=("#252525", "#181818"), corner_radius=8)
+        remaining_panel.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(
+            remaining_panel,
+            text="Remaining race value (95 − handicap)",
+            font=("Segoe UI", 13, "bold"),
+        ).pack(anchor="w", padx=12, pady=(10, 4))
+        self.remaining_rows: dict[str, ctk.CTkLabel] = {}
+        for suit_name in ["Spades", "Hearts", "Clubs", "Diamonds"]:
+            style = SUIT_STYLES[suit_name]
+            row = ctk.CTkFrame(remaining_panel, fg_color="transparent")
+            row.pack(fill="x", padx=12, pady=2)
+            ctk.CTkLabel(
+                row,
+                text=f"{style['symbol']} {suit_name}",
+                text_color=style["color"],
+                font=("Segoe UI", 13, "bold"),
+                width=110,
+                anchor="w",
+            ).pack(side="left")
+            value = ctk.CTkLabel(row, text="—", font=("Consolas", 14), anchor="w")
+            value.pack(side="left", padx=(8, 0))
+            self.remaining_rows[suit_name] = value
+        self.remaining_favourite = ctk.CTkLabel(
+            remaining_panel,
+            text="",
+            font=("Segoe UI", 12),
+            text_color="#aaaaaa",
+            wraplength=280,
+            justify="left",
+        )
+        self.remaining_favourite.pack(anchor="w", padx=12, pady=(6, 10))
+
+        table_panel = ctk.CTkFrame(right_col, fg_color=("#252525", "#181818"), corner_radius=8)
+        table_panel.pack(fill="x")
         ctk.CTkLabel(table_panel, text="Generated table", font=("Segoe UI", 13, "bold")).pack(
             anchor="w", padx=12, pady=(10, 6)
         )
@@ -112,6 +161,22 @@ class DemoApp(ctk.CTk):
         if self.paths:
             self.show()
 
+    def _refresh_guess_stats(self) -> None:
+        stats = self.store.pre_race_guess_accuracy()
+        if stats.total == 0:
+            self.guess_stats.configure(
+                text="Pre-race guess accuracy: no scored games yet (need a winner + readable handicap)",
+                text_color="#888888",
+            )
+            return
+        self.guess_stats.configure(
+            text=(
+                f"Pre-race guess accuracy: {stats.correct}/{stats.total} "
+                f"({stats.percent:.0f}%) — finished games only"
+            ),
+            text_color="#58a6ff" if stats.percent and stats.percent >= 50 else "#ff9f43",
+        )
+
     @staticmethod
     def _result_row(parent: ctk.CTkFrame, row: int, title: str) -> ctk.CTkLabel:
         ctk.CTkLabel(parent, text=f"{title}:", width=100, anchor="w", font=("Segoe UI", 13)).grid(
@@ -141,7 +206,38 @@ class DemoApp(ctk.CTk):
         }.get(phase.value, phase.value)
         self.result_phase.configure(text=phase_text)
         self.result_session.configure(text=self.last_session_text)
+        self._render_remaining_values(result)
         self._render_card_table(result, table_cards)
+
+    def _render_remaining_values(self, result: ExtractionResult) -> None:
+        if not result.has_handicap_cards():
+            for label in self.remaining_rows.values():
+                label.configure(text="—", text_color=("gray10", "gray90"))
+            self.remaining_favourite.configure(text="Handicap not visible yet.")
+            return
+
+        remaining = remaining_after_handicap(result.handicap_cards)
+        favourite = favourite_suit(remaining)
+        for suit_name, label in self.remaining_rows.items():
+            value = remaining.get(suit_name)
+            if value is None:
+                label.configure(text="?", text_color="#888888")
+                continue
+            is_best = suit_name == favourite
+            label.configure(
+                text=f"{value} pts",
+                text_color=SUIT_STYLES[suit_name]["color"] if is_best else ("gray10", "gray90"),
+            )
+        if favourite:
+            self.remaining_favourite.configure(
+                text=f"Best pre-race chance: {favourite} (highest remaining value)",
+                text_color=SUIT_STYLES[favourite]["color"],
+            )
+        else:
+            self.remaining_favourite.configure(
+                text="Could not read all handicap cards.",
+                text_color="#888888",
+            )
 
     def _render_card_table(self, result: ExtractionResult, table_cards=None) -> None:
         for frame in self.card_row_frames.values():
@@ -198,8 +294,9 @@ class DemoApp(ctk.CTk):
             self.history_win.lift()
             self.history_win.focus()
             return
-        self.history_win = HistoryWindow(self)
+        self.history_win = HistoryWindow(self, store=self.store)
         self.history_win.focus()
+        self._refresh_guess_stats()
 
     def prev(self) -> None:
         if not self.paths:
@@ -260,6 +357,7 @@ class DemoApp(ctk.CTk):
             self.show_frame(frame, rel, table_cards=decision.table_cards)
         else:
             self.result_session.configure(text=self.last_session_text)
+        self._refresh_guess_stats()
         self.after_id = self.after(int(decision.next_wait_seconds * 1000), self._loop_tick)
 
     def show(self) -> None:

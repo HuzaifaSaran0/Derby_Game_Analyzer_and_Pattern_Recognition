@@ -65,6 +65,50 @@ def test_store_saves_game_frames_and_winner(tmp_path: Path):
     assert game.frames[1].screenshot_path.name == "002.png"
 
 
+def test_store_pre_race_guess_accuracy(tmp_path: Path):
+    db = tmp_path / "games.sqlite"
+    store = GameStore(db)
+    shot = tmp_path / "001.png"
+    shot.write_bytes(b"x")
+    now = datetime(2026, 8, 18, 18, 0, 0)
+    handicap = (("AS", "KS", "QS"), ("2H", "3H", "4H"), ("6C", "8C", "9C"), ("10D", "JD", "QD"))
+
+    store.record(
+        _decision(seq=1, phase=GamePhase.FINISHED, game_id="101"),
+        _result(
+            race_state=RaceState.FINISHED,
+            winner_suit=Suit.HEARTS,
+            handicap_cards=handicap,
+        ),
+        shot,
+        now,
+        root=tmp_path,
+    )
+    store.record(
+        _decision(seq=1, phase=GamePhase.FINISHED, game_id="102"),
+        _result(
+            race_state=RaceState.FINISHED,
+            winner_suit=Suit.CLUBS,
+            handicap_cards=handicap,
+        ),
+        shot,
+        now,
+        root=tmp_path,
+    )
+    store.record(
+        _decision(seq=1, phase=GamePhase.DEALT, game_id="103"),
+        _result(handicap_cards=handicap),
+        shot,
+        now,
+        root=tmp_path,
+    )
+
+    stats = store.pre_race_guess_accuracy()
+    assert stats.total == 2
+    assert stats.correct == 1
+    assert stats.percent == 50.0
+
+
 def test_store_skips_waiting_frames(tmp_path: Path):
     store = GameStore(tmp_path / "games.sqlite")
     store.record(

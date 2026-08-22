@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from game_analyzer.models import ExtractionResult
+from game_analyzer.race_values import GuessAccuracy, PreRaceOutcome, guess_accuracy, parse_handicap_rows, pre_race_outcome
 from game_analyzer.session import SessionDecision
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -56,6 +57,7 @@ class StoredGame:
     started_at: str
     finished_at: str | None
     winner_suit: str | None
+    handicap_cards: tuple[tuple[str, ...], ...]
     table_cards: list
     frames: tuple[StoredFrame, ...]
 
@@ -199,11 +201,30 @@ class GameStore:
             for row in frame_rows
         )
         table = json.loads(game["table_json"] or "[]")
+        handicap = parse_handicap_rows(json.loads(game["handicap_json"] or "[]"))
         return StoredGame(
             game_id=game["game_id"],
             started_at=game["started_at"],
             finished_at=game["finished_at"],
             winner_suit=game["winner_suit"],
+            handicap_cards=handicap,
             table_cards=table,
             frames=frames,
         )
+
+    def pre_race_guess_accuracy(self) -> GuessAccuracy:
+        with self._connect(autocommit=True) as con:
+            rows = con.execute(
+                "SELECT winner_suit, handicap_json FROM games WHERE winner_suit IS NOT NULL"
+            ).fetchall()
+        records = [
+            (row["winner_suit"], parse_handicap_rows(json.loads(row["handicap_json"] or "[]")))
+            for row in rows
+        ]
+        return guess_accuracy(records)
+
+    def pre_race_outcome_for(self, game_id: str) -> PreRaceOutcome | None:
+        game = self.get_game(game_id)
+        if game is None:
+            return None
+        return pre_race_outcome(game.winner_suit, game.handicap_cards)
