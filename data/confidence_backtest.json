@@ -1,0 +1,39 @@
+{
+  "export_path": "/home/huzaifa/projects/Game_analyzer/data/games_research_export.json",
+  "verified_only": true,
+  "draw_cards": 6,
+  "simulations": 800,
+  "games_in_export": 396,
+  "evaluated": 387,
+  "skipped": {
+    "not_ready": 9
+  },
+  "by_level": {
+    "HIGH": {
+      "total": 115,
+      "correct": 77,
+      "accuracy_pct": 67.0
+    },
+    "LOW": {
+      "total": 163,
+      "correct": 64,
+      "accuracy_pct": 39.3
+    },
+    "MEDIUM": {
+      "total": 43,
+      "correct": 26,
+      "accuracy_pct": 60.5
+    },
+    "VERY_HIGH": {
+      "total": 66,
+      "correct": 63,
+      "accuracy_pct": 95.5
+    }
+  },
+  "high_plus": {
+    "total": 181,
+    "correct": 140,
+    "accuracy_pct": 77.3,
+    "coverage_pct": 46.8
+  }
+}

@@ -7,6 +7,7 @@ from PIL import Image
 
 from game_analyzer.config import load_config
 from game_analyzer.models import ExtractionResult, Suit
+from game_analyzer.confidence import evaluate_confidence, format_confidence_text
 from game_analyzer.race_values import race_snapshot, suits_match
 from game_analyzer.store import GameStore
 from game_analyzer.vision import draw_table_overlay, extract_real, read_image
@@ -146,6 +147,7 @@ class DemoApp(ctk.CTk):
         left.pack(fill="x", padx=12, pady=(0, 14))
         self.result_state = self._result_row(left, "Race state")
         self.result_guess = self._result_row(left, "Locked guess")
+        self.result_confidence = self._result_row(left, "Confidence")
         self.result_winner = self._result_row(left, "Winner (OCR)")
         self.result_phase = self._result_row(left, "Game phase")
         self.result_session = self._result_row(left, "Session")
@@ -244,6 +246,17 @@ class DemoApp(ctk.CTk):
             self.result_guess.configure(text=guess_text)
         else:
             self.result_guess.configure(text="not locked yet (need 2 draw rounds)")
+        guess_draws = locked_guess_draws if locked_guess_draws else drawn_cards
+        if result.has_handicap_cards() and guess_draws:
+            confidence = evaluate_confidence(
+                tuple(result.handicap_cards),
+                guess_draws,
+                pick=locked_guess,
+                simulations=1000,
+            )
+            self.result_confidence.configure(text=format_confidence_text(confidence))
+        else:
+            self.result_confidence.configure(text="—")
         self.result_winner.configure(text=winner)
         phase = result.game_phase()
         phase_text = {
