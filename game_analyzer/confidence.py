@@ -42,6 +42,18 @@ class ConfidenceThresholds:
 
 DEFAULT_THRESHOLDS = ConfidenceThresholds()
 
+_LEVEL_ORDER = (
+    ConfidenceLevel.NONE,
+    ConfidenceLevel.LOW,
+    ConfidenceLevel.MEDIUM,
+    ConfidenceLevel.HIGH,
+    ConfidenceLevel.VERY_HIGH,
+)
+
+
+def level_at_least(level: ConfidenceLevel, minimum: ConfidenceLevel) -> bool:
+    return _LEVEL_ORDER.index(level) >= _LEVEL_ORDER.index(minimum)
+
 
 @dataclass(frozen=True)
 class ConfidenceResult:

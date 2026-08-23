@@ -7,7 +7,8 @@ from PIL import Image
 
 from game_analyzer.config import load_config
 from game_analyzer.models import ExtractionResult, Suit
-from game_analyzer.confidence import evaluate_confidence, format_confidence_text
+from game_analyzer.alerts import alert_settings_from_config, confidence_summary_for_ui
+from game_analyzer.confidence import ConfidenceLevel, ConfidenceResult, evaluate_confidence, level_at_least
 from game_analyzer.race_values import race_snapshot, suits_match
 from game_analyzer.store import GameStore
 from game_analyzer.vision import draw_table_overlay, extract_real, read_image
@@ -32,6 +33,7 @@ class DemoApp(ctk.CTk):
         ctk.set_appearance_mode("dark")
 
         self.config_data = load_config()
+        self.alert_settings = alert_settings_from_config(self.config_data)
         root = Path(__file__).resolve().parent.parent
         self.store = GameStore(root=root)
         self.paths = sorted((root / REAL_DIR_NAME).glob("*.png"))
@@ -42,6 +44,8 @@ class DemoApp(ctk.CTk):
         self.last_session_text = "offline screenshot"
         self.last_table_cards = None
         self._result_value_labels: list[ctk.CTkLabel] = []
+        self._preview_rgb = None
+        self._window_width = 900
 
         nav = ctk.CTkFrame(self)
         nav.pack(fill="x", padx=12, pady=(8, 4))
@@ -68,16 +72,64 @@ class DemoApp(ctk.CTk):
         self.guess_stats.pack(fill="x", padx=12, pady=(0, 4))
         self._refresh_guess_stats()
 
-        top = ctk.CTkFrame(self, fg_color="transparent")
-        top.pack(fill="x", padx=12, pady=(8, 4))
-        top.grid_columnconfigure(0, weight=1)
-        top.grid_columnconfigure(1, weight=0)
+        self.confidence_strip = ctk.CTkLabel(
+            self,
+            text="Confidence: —",
+            font=("Segoe UI", 13, "bold"),
+            text_color="#aaaaaa",
+            fg_color="#3d3d3d",
+            corner_radius=6,
+            anchor="w",
+            justify="left",
+            wraplength=860,
+        )
+        self.confidence_strip.pack(fill="x", padx=12, pady=(0, 6))
 
-        self.preview = ctk.CTkLabel(top, text="")
-        self.preview.grid(row=0, column=0, sticky="nw", padx=(0, 12))
+        self.alert_banner = ctk.CTkLabel(
+            self,
+            text="",
+            font=("Segoe UI", 14, "bold"),
+            text_color="#1a1a1a",
+            fg_color="#3d3d3d",
+            corner_radius=6,
+            anchor="w",
+            justify="left",
+            wraplength=860,
+        )
+        self.alert_banner.pack(fill="x", padx=12, pady=(0, 6))
+        self.alert_banner.pack_forget()
+
+        self.main_scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self.main_scroll.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+
+        top = ctk.CTkFrame(self.main_scroll, fg_color="transparent")
+        top.pack(fill="x", pady=(0, 4))
+        top.grid_columnconfigure(0, weight=0)
+        top.grid_columnconfigure(1, weight=1)
+
+        left_col = ctk.CTkFrame(top, fg_color="transparent")
+        left_col.grid(row=0, column=0, rowspan=2, sticky="nw", padx=(0, 12))
+
+        self.preview = ctk.CTkLabel(left_col, text="")
+        self.preview.grid(row=0, column=0, sticky="nw")
+
+        self.results_frame = ctk.CTkFrame(left_col, fg_color=("#2b2b2b", "#1e1e1e"), corner_radius=8)
+        self.results_frame.grid(row=1, column=0, sticky="nw", pady=(8, 0))
+        self.results_frame.grid_propagate(False)
+        ctk.CTkLabel(self.results_frame, text="Fetched data", font=("Segoe UI", 13, "bold")).pack(
+            anchor="w", padx=12, pady=(8, 4)
+        )
+        fetched_rows = ctk.CTkFrame(self.results_frame, fg_color="transparent")
+        fetched_rows.pack(fill="x", padx=12, pady=(0, 10))
+        self.result_state = self._result_row(fetched_rows, "Race state")
+        self.result_guess = self._result_row(fetched_rows, "Locked guess")
+        self.result_confidence = self._result_row(fetched_rows, "Confidence")
+        self.result_winner = self._result_row(fetched_rows, "Winner (OCR)")
+        self.result_phase = self._result_row(fetched_rows, "Game phase")
+        self.result_session = self._result_row(fetched_rows, "Session")
 
         right_col = ctk.CTkFrame(top, fg_color="transparent")
-        right_col.grid(row=0, column=1, sticky="ne")
+        right_col.grid(row=0, column=1, rowspan=2, sticky="ne")
 
         remaining_panel = ctk.CTkFrame(right_col, fg_color=("#252525", "#181818"), corner_radius=8)
         remaining_panel.pack(fill="x", pady=(0, 8))
@@ -107,7 +159,7 @@ class DemoApp(ctk.CTk):
             text="",
             font=("Segoe UI", 12),
             text_color="#aaaaaa",
-            wraplength=280,
+            wraplength=300,
             justify="left",
         )
         self.remaining_favourite.pack(anchor="w", padx=12, pady=(6, 10))
@@ -138,27 +190,18 @@ class DemoApp(ctk.CTk):
             cards.grid(row=0, column=1, sticky="w")
             self.card_row_frames[suit_name] = cards
 
-        results = ctk.CTkFrame(self, fg_color=("#2b2b2b", "#1e1e1e"))
-        results.pack(fill="x", padx=12, pady=(0, 6))
-        ctk.CTkLabel(results, text="Fetched data", font=("Segoe UI", 13, "bold")).pack(
-            anchor="w", padx=12, pady=(8, 4)
-        )
-        left = ctk.CTkFrame(results, fg_color="transparent")
-        left.pack(fill="x", padx=12, pady=(0, 14))
-        self.result_state = self._result_row(left, "Race state")
-        self.result_guess = self._result_row(left, "Locked guess")
-        self.result_confidence = self._result_row(left, "Confidence")
-        self.result_winner = self._result_row(left, "Winner (OCR)")
-        self.result_phase = self._result_row(left, "Game phase")
-        self.result_session = self._result_row(left, "Session")
-
         self.status = ctk.CTkLabel(
-            self, text="", font=("Consolas", 13), justify="left", anchor="w", wraplength=860
+            self.main_scroll,
+            text="",
+            font=("Consolas", 12),
+            justify="left",
+            anchor="w",
+            wraplength=860,
         )
-        self.status.pack(fill="x", padx=12, pady=(0, 6))
+        self.status.pack(fill="x", pady=(0, 4))
 
-        self.log = ctk.CTkTextbox(self, height=100)
-        self.log.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self.log = ctk.CTkTextbox(self, height=56)
+        self.log.pack(fill="x", padx=12, pady=(0, 10))
         self.log.insert(
             "end",
             "Reads winner row (green) + handicap cards + the 3 move cards.\n"
@@ -171,14 +214,47 @@ class DemoApp(ctk.CTk):
 
         if self.paths:
             self.show()
+        self._refresh_layout_widths()
+
+    def _left_column_width(self, window_width: int) -> int:
+        """Left column ~55% of window, leaving room for the right-hand panels."""
+        target = int(window_width * 0.55)
+        max_left = max(280, window_width - 340)
+        return max(280, min(target, max_left))
+
+    def _preview_size(self, window_width: int) -> tuple[int, int]:
+        width = self._left_column_width(window_width)
+        height = max(140, int(width * 278 / 520))
+        return width, height
+
+    def _refresh_layout_widths(self) -> None:
+        left_w = self._left_column_width(self._window_width)
+        fetched_wrap = max(160, left_w - 120)
+        self.results_frame.configure(width=left_w)
+        for label in self._result_value_labels:
+            label.configure(wraplength=fetched_wrap)
+
+    def _refresh_preview_image(self) -> None:
+        if self._preview_rgb is None:
+            return
+        width, height = self._preview_size(self._window_width)
+        image = Image.fromarray(self._preview_rgb).resize((width, height))
+        photo = ctk.CTkImage(light_image=image, dark_image=image, size=(width, height))
+        self.preview.configure(image=photo)
+        self.preview.image = photo
 
     def _on_window_configure(self, event) -> None:
         if event.widget is not self:
             return
+        self._window_width = event.width
         wrap = max(360, event.width - 48)
         self.status.configure(wraplength=wrap)
-        for label in self._result_value_labels:
-            label.configure(wraplength=max(420, event.width - 180))
+        self.confidence_strip.configure(wraplength=wrap)
+        self.alert_banner.configure(wraplength=wrap)
+        right_wrap = max(220, min(360, event.width - self._left_column_width(event.width) - 48))
+        self.remaining_favourite.configure(wraplength=right_wrap)
+        self._refresh_layout_widths()
+        self._refresh_preview_image()
 
     def _refresh_guess_stats(self) -> None:
         stats = self.store.pre_race_guess_accuracy()
@@ -198,13 +274,13 @@ class DemoApp(ctk.CTk):
 
     def _result_row(self, parent: ctk.CTkFrame, title: str) -> ctk.CTkLabel:
         row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", pady=2)
+        row.pack(fill="x", pady=1)
         ctk.CTkLabel(
             row,
             text=f"{title}:",
-            width=110,
+            width=100,
             anchor="nw",
-            font=("Segoe UI", 13),
+            font=("Segoe UI", 12),
         ).pack(side="left", anchor="n")
         value = ctk.CTkLabel(
             row,
@@ -212,11 +288,66 @@ class DemoApp(ctk.CTk):
             anchor="nw",
             justify="left",
             wraplength=760,
-            font=("Consolas", 14),
+            font=("Consolas", 13),
         )
         value.pack(side="left", fill="x", expand=True, padx=(8, 0), anchor="n")
         self._result_value_labels.append(value)
         return value
+
+    def _confidence_strip_style(
+        self,
+        level: ConfidenceLevel,
+        *,
+        alert_fired: bool,
+        would_alert: bool,
+    ) -> tuple[str, str]:
+        if alert_fired:
+            return "#1a1a1a", "#2ea043"
+        if would_alert:
+            return "#1a1a1a", "#d4a72c"
+        styles = {
+            ConfidenceLevel.NONE: ("#aaaaaa", "#3d3d3d"),
+            ConfidenceLevel.LOW: ("#ff9f43", "#3d2a1a"),
+            ConfidenceLevel.MEDIUM: ("#58a6ff", "#1a2a3d"),
+            ConfidenceLevel.HIGH: ("#7ee787", "#1a3d2a"),
+            ConfidenceLevel.VERY_HIGH: ("#7ee787", "#1a3d2a"),
+        }
+        return styles.get(level, ("#aaaaaa", "#3d3d3d"))
+
+    def _update_confidence_strip(
+        self,
+        confidence: ConfidenceResult,
+        *,
+        alert_fired: bool,
+        alert_kind: str | None,
+        alert_message: str | None,
+    ) -> None:
+        summary = confidence_summary_for_ui(
+            confidence,
+            settings=self.alert_settings,
+            alert_fired=alert_fired,
+            alert_kind=alert_kind,
+        )
+        would_alert = (
+            self.alert_settings.enabled
+            and confidence.ready
+            and level_at_least(confidence.level, self.alert_settings.min_level)
+            and not alert_fired
+        )
+        if alert_fired and alert_message:
+            text = f"ALERT ({alert_kind}): {alert_message}"
+        elif not confidence.ready:
+            text = "Confidence: — (need 2 draw rounds)"
+        else:
+            text = f"Confidence: {summary}"
+            if not self.alert_settings.enabled:
+                text += "  ·  client alerts off (set alerts.enabled in config.json)"
+        fg, bg = self._confidence_strip_style(
+            confidence.level,
+            alert_fired=alert_fired,
+            would_alert=would_alert,
+        )
+        self.confidence_strip.configure(text=text, text_color=fg, fg_color=bg)
 
     def _set_results(
         self,
@@ -226,6 +357,11 @@ class DemoApp(ctk.CTk):
         locked_guess: str | None = None,
         locked_guess_draws: tuple[str, ...] = (),
         locked_guess_rounds: int = 0,
+        confidence_level: str | None = None,
+        confidence_reasons: tuple[str, ...] = (),
+        alert_fired: bool = False,
+        alert_kind: str | None = None,
+        alert_message: str | None = None,
     ) -> None:
         winner = result.winner_suit.value.title() if result.winner_suit else "none yet"
         state = {
@@ -254,9 +390,49 @@ class DemoApp(ctk.CTk):
                 pick=locked_guess,
                 simulations=1000,
             )
-            self.result_confidence.configure(text=format_confidence_text(confidence))
+            if confidence_level:
+                confidence = ConfidenceResult(
+                    level=ConfidenceLevel(confidence_level),
+                    pick=confidence.pick,
+                    track_leader=confidence.track_leader,
+                    track_gap=confidence.track_gap,
+                    pick_on_track_leader=confidence.pick_on_track_leader,
+                    mc_probs=confidence.mc_probs,
+                    mc_pick=confidence.mc_pick,
+                    mc_margin=confidence.mc_margin,
+                    rivals_weak_count=confidence.rivals_weak_count,
+                    draw_rounds=confidence.draw_rounds,
+                    reasons=confidence_reasons or confidence.reasons,
+                )
+            self.result_confidence.configure(
+                text=confidence_summary_for_ui(
+                    confidence,
+                    settings=self.alert_settings,
+                    alert_fired=alert_fired,
+                    alert_kind=alert_kind,
+                )
+            )
+            self._update_confidence_strip(
+                confidence,
+                alert_fired=alert_fired,
+                alert_kind=alert_kind,
+                alert_message=alert_message,
+            )
         else:
             self.result_confidence.configure(text="—")
+            self.confidence_strip.configure(
+                text="Confidence: — (handicap or draw cards not readable)",
+                text_color="#aaaaaa",
+                fg_color="#3d3d3d",
+            )
+        if alert_fired and alert_message:
+            self.alert_banner.configure(
+                text=f"ALERT ({alert_kind}): {alert_message}",
+                fg_color="#2ea043",
+            )
+            self.alert_banner.pack(fill="x", padx=12, pady=(0, 6), before=self.main_scroll)
+        else:
+            self.alert_banner.pack_forget()
         self.result_winner.configure(text=winner)
         phase = result.game_phase()
         phase_text = {
@@ -495,6 +671,11 @@ class DemoApp(ctk.CTk):
                 locked_guess=decision.locked_guess,
                 locked_guess_draws=decision.locked_guess_draws,
                 locked_guess_rounds=decision.locked_guess_rounds,
+                confidence_level=decision.confidence_level,
+                confidence_reasons=decision.confidence_reasons,
+                alert_fired=decision.alert_fired,
+                alert_kind=decision.alert_kind,
+                alert_message=decision.alert_message,
             )
         else:
             self.result_session.configure(text=self.last_session_text)
@@ -515,6 +696,11 @@ class DemoApp(ctk.CTk):
         locked_guess: str | None = None,
         locked_guess_draws: tuple[str, ...] = (),
         locked_guess_rounds: int = 0,
+        confidence_level: str | None = None,
+        confidence_reasons: tuple[str, ...] = (),
+        alert_fired: bool = False,
+        alert_kind: str | None = None,
+        alert_message: str | None = None,
     ) -> None:
         result = extract_real(frame, self.config_data)
         if not drawn_cards and result.draw_cards:
@@ -524,10 +710,8 @@ class DemoApp(ctk.CTk):
             shown = draw_table_overlay(rgb, self.config_data, result)
         else:
             shown = rgb
-        image = Image.fromarray(shown).resize((560, 300))
-        photo = ctk.CTkImage(light_image=image, dark_image=image, size=(560, 300))
-        self.preview.configure(image=photo)
-        self.preview.image = photo
+        self._preview_rgb = shown
+        self._refresh_preview_image()
 
         self._set_results(
             result,
@@ -536,6 +720,11 @@ class DemoApp(ctk.CTk):
             locked_guess=locked_guess,
             locked_guess_draws=locked_guess_draws,
             locked_guess_rounds=locked_guess_rounds,
+            confidence_level=confidence_level,
+            confidence_reasons=confidence_reasons,
+            alert_fired=alert_fired,
+            alert_kind=alert_kind,
+            alert_message=alert_message,
         )
 
         winner = result.winner_suit.value if result.winner_suit else "none"

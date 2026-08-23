@@ -31,6 +31,14 @@
     "result_poll_seconds": 0.5
   },
   "draw_overlays": false,
+  "alerts": {
+    "enabled": false,
+    "min_level": "HIGH",
+    "webhook_url": "",
+    "log_path": "data/alerts.log",
+    "allow_upgrade": true,
+    "allow_cancel": true
+  },
   "consensus_frames": 3,
   "match_threshold": 0.75,
   "rois": {
