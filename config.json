@@ -32,12 +32,13 @@
   },
   "draw_overlays": false,
   "alerts": {
-    "enabled": false,
-    "min_level": "HIGH",
+    "enabled": true,
+    "min_level": "MEDIUM",
     "webhook_url": "",
     "log_path": "data/alerts.log",
     "allow_upgrade": true,
-    "allow_cancel": true
+    "allow_cancel": true,
+    "mc_upgrade_delta": 0.05
   },
   "consensus_frames": 3,
   "match_threshold": 0.75,

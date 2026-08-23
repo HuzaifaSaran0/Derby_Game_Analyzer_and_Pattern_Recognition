@@ -55,6 +55,14 @@ def test_format_confidence_text_for_none():
     assert format_confidence_text(result) == "— (need 2 draw rounds)"
 
 
+def test_format_confidence_text_includes_percentage():
+    result = evaluate_confidence(HANDICAP, DOMINANT_SIX, pick="Spades", simulations=200, seed=5)
+    text = format_confidence_text(result)
+    assert "%" in text
+    if result.confidence_pct is not None:
+        assert str(result.confidence_pct) in text
+
+
 def test_backtest_runs_on_export_if_present():
     from pathlib import Path
 

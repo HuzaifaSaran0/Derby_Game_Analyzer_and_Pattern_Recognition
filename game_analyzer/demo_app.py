@@ -98,6 +98,7 @@ class DemoApp(ctk.CTk):
         )
         self.alert_banner.pack(fill="x", padx=12, pady=(0, 6))
         self.alert_banner.pack_forget()
+        self._alert_banner_visible = False
 
         self.main_scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.main_scroll.pack(fill="both", expand=True, padx=12, pady=(0, 6))
@@ -349,6 +350,23 @@ class DemoApp(ctk.CTk):
         )
         self.confidence_strip.configure(text=text, text_color=fg, fg_color=bg)
 
+    def _set_alert_banner(self, *, visible: bool, text: str = "", kind: str | None = None) -> None:
+        if visible:
+            self.alert_banner.configure(
+                text=f"ALERT ({kind}): {text}" if kind else text,
+                fg_color="#2ea043",
+            )
+            if not self._alert_banner_visible:
+                self.main_scroll.pack_forget()
+                self.alert_banner.pack(fill="x", padx=12, pady=(0, 6))
+                self.main_scroll.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+                self._alert_banner_visible = True
+        elif self._alert_banner_visible:
+            self.alert_banner.pack_forget()
+            self._alert_banner_visible = False
+            if not self.main_scroll.winfo_ismapped():
+                self.main_scroll.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+
     def _set_results(
         self,
         result: ExtractionResult,
@@ -359,6 +377,7 @@ class DemoApp(ctk.CTk):
         locked_guess_rounds: int = 0,
         confidence_level: str | None = None,
         confidence_reasons: tuple[str, ...] = (),
+        confidence_pct: int | None = None,
         alert_fired: bool = False,
         alert_kind: str | None = None,
         alert_message: str | None = None,
@@ -403,6 +422,7 @@ class DemoApp(ctk.CTk):
                     rivals_weak_count=confidence.rivals_weak_count,
                     draw_rounds=confidence.draw_rounds,
                     reasons=confidence_reasons or confidence.reasons,
+                    confidence_pct=confidence_pct if confidence_pct is not None else confidence.confidence_pct,
                 )
             self.result_confidence.configure(
                 text=confidence_summary_for_ui(
@@ -426,13 +446,9 @@ class DemoApp(ctk.CTk):
                 fg_color="#3d3d3d",
             )
         if alert_fired and alert_message:
-            self.alert_banner.configure(
-                text=f"ALERT ({alert_kind}): {alert_message}",
-                fg_color="#2ea043",
-            )
-            self.alert_banner.pack(fill="x", padx=12, pady=(0, 6), before=self.main_scroll)
+            self._set_alert_banner(visible=True, text=alert_message, kind=alert_kind)
         else:
-            self.alert_banner.pack_forget()
+            self._set_alert_banner(visible=False)
         self.result_winner.configure(text=winner)
         phase = result.game_phase()
         phase_text = {
@@ -673,6 +689,7 @@ class DemoApp(ctk.CTk):
                 locked_guess_rounds=decision.locked_guess_rounds,
                 confidence_level=decision.confidence_level,
                 confidence_reasons=decision.confidence_reasons,
+                confidence_pct=decision.confidence_pct,
                 alert_fired=decision.alert_fired,
                 alert_kind=decision.alert_kind,
                 alert_message=decision.alert_message,
@@ -698,6 +715,7 @@ class DemoApp(ctk.CTk):
         locked_guess_rounds: int = 0,
         confidence_level: str | None = None,
         confidence_reasons: tuple[str, ...] = (),
+        confidence_pct: int | None = None,
         alert_fired: bool = False,
         alert_kind: str | None = None,
         alert_message: str | None = None,
@@ -722,6 +740,7 @@ class DemoApp(ctk.CTk):
             locked_guess_rounds=locked_guess_rounds,
             confidence_level=confidence_level,
             confidence_reasons=confidence_reasons,
+            confidence_pct=confidence_pct,
             alert_fired=alert_fired,
             alert_kind=alert_kind,
             alert_message=alert_message,

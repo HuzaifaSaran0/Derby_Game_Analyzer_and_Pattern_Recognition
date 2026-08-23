@@ -45,9 +45,10 @@ def test_locks_guess_after_two_draw_rounds():
     assert decision.locked_guess_rounds == 2
 
 
-def test_finished_frame_does_not_change_locked_guess():
+def test_finished_frame_upgrades_to_third_round_when_available():
     tracker = GameSessionTracker()
     now = datetime(2026, 8, 22, 12, 0, 0)
+    nine = SIX_DRAWS + ("2H", "3D", "4C")
 
     tracker.observe(_result(handicap_cards=HANDICAP), now, game_id="200")
     tracker.observe(_result(draw_cards=ROUND1), now, game_id="200")
@@ -65,10 +66,9 @@ def test_finished_frame_does_not_change_locked_guess():
         game_id="200",
     )
     assert finished.locked_guess == locked
-    assert finished.locked_guess_draws == SIX_DRAWS
-    assert finished.locked_guess == race_guess(HANDICAP, SIX_DRAWS)
-    # Finished cards are still stored for history.
-    assert finished.drawn_cards == SIX_DRAWS + ("2H", "3D", "4C")
+    assert finished.locked_guess_draws == nine
+    assert finished.locked_guess_rounds == 3
+    assert finished.drawn_cards == nine
 
 
 def test_finished_frame_completes_second_round_and_locks():

@@ -65,6 +65,7 @@ class SessionDecision:
     locked_guess_rounds: int = 0
     confidence_level: str | None = None
     confidence_reasons: tuple[str, ...] = ()
+    confidence_pct: int | None = None
     alert_fired: bool = False
     alert_kind: str | None = None
     alert_message: str | None = None
@@ -102,8 +103,11 @@ class GameSessionTracker:
         self.alert_settings = AlertSettings()
         self._confidence_level: ConfidenceLevel | None = None
         self._confidence_reasons: tuple[str, ...] = ()
+        self._confidence_pct: int | None = None
         self._alert_sent = False
         self._last_alert_level: ConfidenceLevel | None = None
+        self._last_mc_pick: float | None = None
+        self._last_alert_pick: str | None = None
         self._alert_fired_this_decision = False
         self._alert_kind: str | None = None
         self._alert_message: str | None = None
@@ -116,8 +120,11 @@ class GameSessionTracker:
     def _reset_alert_state(self) -> None:
         self._alert_sent = False
         self._last_alert_level = None
+        self._last_mc_pick = None
+        self._last_alert_pick = None
         self._confidence_level = None
         self._confidence_reasons = ()
+        self._confidence_pct = None
 
     def _lock_fields(self) -> dict[str, object]:
         return {
@@ -133,6 +140,7 @@ class GameSessionTracker:
                 self._confidence_level.value if self._confidence_level else None
             ),
             "confidence_reasons": self._confidence_reasons,
+            "confidence_pct": self._confidence_pct,
             "alert_fired": self._alert_fired_this_decision,
             "alert_kind": self._alert_kind,
             "alert_message": self._alert_message,
@@ -141,12 +149,22 @@ class GameSessionTracker:
     def _update_locked_guess(self) -> bool:
         """Freeze or upgrade the official guess from draw cards only — never from winner OCR."""
         if not self.handicap_cards:
-            return
+            return False
         drawn = tuple(self.drawn_cards)
         locked = lock_guess(self.handicap_cards, drawn)
         if locked is None:
             return False
-        if locked.draw_rounds <= self.locked_guess_rounds:
+        changed = (
+            locked.draw_rounds > self.locked_guess_rounds
+            or (
+                self.locked_guess is not None
+                and locked.suit
+                and locked.suit.title() != self.locked_guess.title()
+            )
+        )
+        if not changed and locked.draw_rounds <= self.locked_guess_rounds:
+            return False
+        if locked.draw_rounds < self.locked_guess_rounds:
             return False
         self.locked_guess = locked.suit
         self.locked_guess_draws = locked.draw_cards
@@ -165,11 +183,14 @@ class GameSessionTracker:
         )
         self._confidence_level = confidence.level
         self._confidence_reasons = confidence.reasons
+        self._confidence_pct = confidence.confidence_pct
         if allow_alerts:
             transition = compute_alert_transition(
                 settings=self.alert_settings,
                 previously_sent=self._alert_sent,
                 previous_level=self._last_alert_level,
+                previous_mc_pick=self._last_mc_pick,
+                previous_pick=self._last_alert_pick,
                 confidence=confidence,
                 game_id=game_id,
             )
@@ -178,7 +199,9 @@ class GameSessionTracker:
                 self._alert_kind = transition.kind
                 self._alert_message = transition.message
                 self._alert_sent = True
+                self._last_alert_pick = confidence.pick
         self._last_alert_level = confidence.level
+        self._last_mc_pick = confidence.mc_pick
 
     def _fingerprint(self, result: ExtractionResult) -> tuple:
         return (result.game_phase(), result.handicap_cards, result.draw_cards)
@@ -395,12 +418,10 @@ class GameSessionTracker:
         if phase == GamePhase.FINISHED:
             # Winner-screen draw cards are often the only copy of the deciding round
             # (IN_PLAY for that round is frequently missed). Ingest them first so a
-            # second/third round can complete the lock — still card math only, never
-            # winner OCR. If we already locked earlier, do not upgrade from FINISHED.
-            already_locked = self.locked_guess is not None
+            # second/third round can complete or refine the lock — still card math only,
+            # never winner OCR.
             self._ingest_cards(result)
-            if not already_locked:
-                self._update_locked_guess()
+            self._update_locked_guess()
             self._refresh_confidence(
                 allow_alerts=False,
                 game_id=game_id or self.session_game_id,

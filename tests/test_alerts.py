@@ -41,7 +41,7 @@ def test_level_at_least_helper():
 def test_alert_settings_default_disabled():
     settings = alert_settings_from_config({})
     assert settings.enabled is False
-    assert settings.min_level is ConfidenceLevel.HIGH
+    assert settings.min_level is ConfidenceLevel.MEDIUM
 
 
 def test_compute_bet_transition_when_qualifying():
@@ -57,6 +57,8 @@ def test_compute_bet_transition_when_qualifying():
         settings=AlertSettings(enabled=True),
         previously_sent=False,
         previous_level=None,
+        previous_mc_pick=None,
+        previous_pick=None,
         confidence=confidence,
         game_id="42",
     )
@@ -76,7 +78,9 @@ def test_compute_no_duplicate_when_still_high():
     transition = compute_alert_transition(
         settings=AlertSettings(enabled=True),
         previously_sent=True,
-        previous_level=ConfidenceLevel.HIGH,
+        previous_level=confidence.level,
+        previous_mc_pick=confidence.mc_pick,
+        previous_pick=confidence.pick,
         confidence=confidence,
         game_id="42",
     )
@@ -114,6 +118,8 @@ def test_compute_upgrade_transition():
         settings=AlertSettings(enabled=True),
         previously_sent=True,
         previous_level=ConfidenceLevel.MEDIUM,
+        previous_mc_pick=0.5,
+        previous_pick="Spades",
         confidence=high,
         game_id="99",
     )
@@ -152,11 +158,56 @@ def test_compute_cancel_transition():
         settings=AlertSettings(enabled=True),
         previously_sent=True,
         previous_level=ConfidenceLevel.HIGH,
+        previous_mc_pick=0.7,
+        previous_pick="Spades",
         confidence=low,
         game_id="99",
     )
     assert transition.fired
     assert transition.kind == "cancel"
+
+
+def test_compute_upgrade_on_mc_increase():
+    medium = ConfidenceResult(
+        level=ConfidenceLevel.MEDIUM,
+        pick="Clubs",
+        track_leader="Clubs",
+        track_gap=8,
+        pick_on_track_leader=True,
+        mc_probs=None,
+        mc_pick=0.62,
+        mc_margin=0.08,
+        rivals_weak_count=1,
+        draw_rounds=2,
+        reasons=("medium",),
+        confidence_pct=62,
+    )
+    higher = ConfidenceResult(
+        level=ConfidenceLevel.HIGH,
+        pick="Clubs",
+        track_leader="Clubs",
+        track_gap=10,
+        pick_on_track_leader=True,
+        mc_probs=None,
+        mc_pick=0.84,
+        mc_margin=0.18,
+        rivals_weak_count=2,
+        draw_rounds=3,
+        reasons=("high",),
+        confidence_pct=84,
+    )
+    transition = compute_alert_transition(
+        settings=AlertSettings(enabled=True, min_level=ConfidenceLevel.MEDIUM),
+        previously_sent=True,
+        previous_level=ConfidenceLevel.MEDIUM,
+        previous_mc_pick=0.62,
+        previous_pick="Clubs",
+        confidence=higher,
+        game_id="55",
+    )
+    assert transition.fired
+    assert transition.kind == "upgrade"
+    assert "84%" in (transition.message or "")
 
 
 def test_session_does_not_fire_alert_when_disabled():

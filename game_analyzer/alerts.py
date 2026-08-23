@@ -15,15 +15,24 @@ from game_analyzer.confidence import ConfidenceLevel, ConfidenceResult, format_c
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_LOG = ROOT / "data" / "alerts.log"
 
+_LEVEL_ORDER = (
+    ConfidenceLevel.NONE,
+    ConfidenceLevel.LOW,
+    ConfidenceLevel.MEDIUM,
+    ConfidenceLevel.HIGH,
+    ConfidenceLevel.VERY_HIGH,
+)
+
 
 @dataclass(frozen=True)
 class AlertSettings:
     enabled: bool = False
-    min_level: ConfidenceLevel = ConfidenceLevel.HIGH
+    min_level: ConfidenceLevel = ConfidenceLevel.MEDIUM
     webhook_url: str = ""
     log_path: Path = DEFAULT_LOG
     allow_upgrade: bool = True
     allow_cancel: bool = True
+    mc_upgrade_delta: float = 0.05
 
 
 @dataclass(frozen=True)
@@ -35,11 +44,11 @@ class AlertTransition:
 
 def alert_settings_from_config(config: dict[str, Any]) -> AlertSettings:
     raw = config.get("alerts") or {}
-    min_name = str(raw.get("min_level", "HIGH")).upper()
+    min_name = str(raw.get("min_level", "MEDIUM")).upper()
     try:
         min_level = ConfidenceLevel(min_name)
     except ValueError:
-        min_level = ConfidenceLevel.HIGH
+        min_level = ConfidenceLevel.MEDIUM
     log_path = raw.get("log_path")
     return AlertSettings(
         enabled=bool(raw.get("enabled", False)),
@@ -48,6 +57,7 @@ def alert_settings_from_config(config: dict[str, Any]) -> AlertSettings:
         log_path=Path(log_path) if log_path else DEFAULT_LOG,
         allow_upgrade=bool(raw.get("allow_upgrade", True)),
         allow_cancel=bool(raw.get("allow_cancel", True)),
+        mc_upgrade_delta=float(raw.get("mc_upgrade_delta", 0.05)),
     )
 
 
@@ -64,6 +74,8 @@ def format_alert_message(
         f"Pick {pick.title()}",
         f"Confidence {confidence.level.value}",
     ]
+    if confidence.confidence_pct is not None:
+        parts.append(f"{confidence.confidence_pct}%")
     if confidence.track_gap is not None:
         parts.append(f"gap +{confidence.track_gap}")
     if confidence.mc_pick is not None:
@@ -80,6 +92,8 @@ def compute_alert_transition(
     settings: AlertSettings,
     previously_sent: bool,
     previous_level: ConfidenceLevel | None,
+    previous_mc_pick: float | None,
+    previous_pick: str | None,
     confidence: ConfidenceResult,
     game_id: str | None,
 ) -> AlertTransition:
@@ -108,6 +122,29 @@ def compute_alert_transition(
             kind,
             format_alert_message(game_id=game_id, confidence=confidence, kind=kind),
         )
+
+    if previously_sent and settings.allow_upgrade and prev_qualifies and qualifies:
+        level_up = (
+            previous_level is not None
+            and _LEVEL_ORDER.index(confidence.level) > _LEVEL_ORDER.index(previous_level)
+        )
+        mc_up = (
+            previous_mc_pick is not None
+            and confidence.mc_pick is not None
+            and confidence.mc_pick >= previous_mc_pick + settings.mc_upgrade_delta
+        )
+        pick_changed = bool(
+            previous_pick
+            and confidence.pick
+            and previous_pick.title() != confidence.pick.title()
+        )
+        if level_up or mc_up or pick_changed:
+            kind = "upgrade"
+            return AlertTransition(
+                True,
+                kind,
+                format_alert_message(game_id=game_id, confidence=confidence, kind=kind),
+            )
 
     if previously_sent and settings.allow_cancel and prev_qualifies and not qualifies:
         kind = "cancel"

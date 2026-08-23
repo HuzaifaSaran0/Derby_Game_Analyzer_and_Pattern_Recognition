@@ -31,8 +31,9 @@ class ConfidenceThresholds:
     gap_high: int = 10
     gap_very_high: int = 15
     gap_mc_combo: int = 8
-    mc_high: float = 0.60
-    mc_very_high: float = 0.75
+    mc_medium: float = 0.55
+    mc_high: float = 0.80
+    mc_very_high: float = 0.88
     mc_low: float = 0.45
     mc_margin_high: float = 0.15
     mc_margin_low: float = 0.10
@@ -68,6 +69,7 @@ class ConfidenceResult:
     rivals_weak_count: int
     draw_rounds: int
     reasons: tuple[str, ...]
+    confidence_pct: int | None = None
     should_alert: bool = False
 
     @property
@@ -118,6 +120,16 @@ def _rivals_weak_count(
     return weak
 
 
+def _confidence_pct(mc_pick: float | None) -> int | None:
+    if mc_pick is None:
+        return None
+    return int(round(mc_pick * 100))
+
+
+def _level_rank(level: ConfidenceLevel) -> int:
+    return _LEVEL_ORDER.index(level)
+
+
 def _classify_level(
     *,
     pick: str | None,
@@ -143,37 +155,61 @@ def _classify_level(
 
     if (
         track_gap >= thresholds.gap_very_high
-        or (mc_pick is not None and mc_pick >= thresholds.mc_very_high and track_gap >= thresholds.gap_mc_combo)
+        or (
+            mc_pick is not None
+            and mc_pick >= thresholds.mc_very_high
+            and track_gap is not None
+            and track_gap >= thresholds.gap_mc_combo
+        )
     ):
         if track_gap >= thresholds.gap_very_high:
             reasons.append(f"large track gap ({track_gap})")
         if mc_pick is not None and mc_pick >= thresholds.mc_very_high:
-            reasons.append(f"strong MC ({mc_pick:.0%})")
+            reasons.append(f"very strong MC ({mc_pick:.0%})")
         return ConfidenceLevel.VERY_HIGH, tuple(reasons)
 
-    if (
-        (pick_on_leader and track_gap >= thresholds.gap_high)
-        or (
-            mc_pick is not None
-            and mc_pick >= thresholds.mc_high
-            and track_gap is not None
-            and track_gap >= thresholds.gap_low
-            and mc_margin is not None
-            and mc_margin >= thresholds.mc_margin_high
-        )
-        or (
-            pick_on_leader
-            and track_gap >= thresholds.gap_low
-            and rivals_weak >= thresholds.rivals_weak_count
-        )
-    ):
-        if pick_on_leader and track_gap >= thresholds.gap_high:
-            reasons.append(f"track lead +{track_gap}")
-        if mc_pick is not None and mc_pick >= thresholds.mc_high:
+    high_mc = mc_pick is not None and mc_pick >= thresholds.mc_high
+    high_by_gap = (
+        pick_on_leader
+        and track_gap is not None
+        and track_gap >= thresholds.gap_high
+        and (mc_pick is None or mc_pick >= thresholds.mc_medium)
+    )
+    high_by_margin = (
+        high_mc
+        and track_gap is not None
+        and track_gap >= thresholds.gap_low
+        and mc_margin is not None
+        and mc_margin >= thresholds.mc_margin_high
+    )
+    high_by_rivals = (
+        high_mc
+        and pick_on_leader
+        and track_gap is not None
+        and track_gap >= thresholds.gap_low
+        and rivals_weak >= thresholds.rivals_weak_count
+    )
+    if high_mc and (high_by_gap or high_by_margin or high_by_rivals):
+        if high_mc:
             reasons.append(f"MC {mc_pick:.0%}")
+        if pick_on_leader and track_gap is not None and track_gap >= thresholds.gap_high:
+            reasons.append(f"track lead +{track_gap}")
         if rivals_weak >= thresholds.rivals_weak_count:
             reasons.append(f"{rivals_weak} weak rivals")
         return ConfidenceLevel.HIGH, tuple(reasons)
+
+    medium_mc = mc_pick is not None and mc_pick >= thresholds.mc_medium
+    medium_by_gap = (
+        pick_on_leader
+        and track_gap is not None
+        and track_gap >= thresholds.gap_low
+    )
+    if medium_mc or medium_by_gap:
+        if medium_mc:
+            reasons.append(f"MC {mc_pick:.0%}")
+        if medium_by_gap and track_gap is not None:
+            reasons.append(f"track lead +{track_gap}")
+        return ConfidenceLevel.MEDIUM, tuple(reasons or ("guess ready but not a strong edge",))
 
     if track_gap < thresholds.gap_low or (
         mc_pick is not None and mc_pick < thresholds.mc_low
@@ -267,6 +303,7 @@ def evaluate_confidence(
         rivals_weak_count=rivals_weak,
         draw_rounds=rounds,
         reasons=reasons,
+        confidence_pct=_confidence_pct(mc_pick),
         should_alert=False,
     )
 
@@ -274,7 +311,8 @@ def evaluate_confidence(
 def format_confidence_text(result: ConfidenceResult) -> str:
     if result.level is ConfidenceLevel.NONE:
         return "— (need 2 draw rounds)"
-    headline = result.level.value
+    pct = f" ({result.confidence_pct}%)" if result.confidence_pct is not None else ""
+    headline = result.level.value + pct
     if result.pick:
         headline = f"{headline} — {result.pick.title()}"
     details: list[str] = []
