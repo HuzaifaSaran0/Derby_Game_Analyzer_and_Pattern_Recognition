@@ -5,6 +5,7 @@ from pathlib import Path
 import customtkinter as ctk
 from PIL import Image
 
+from game_analyzer.confidence_stats import format_round_snapshot
 from game_analyzer.race_values import pre_race_outcome
 from game_analyzer.store import GameStore
 
@@ -17,7 +18,7 @@ class HistoryWindow(ctk.CTkToplevel):
     def __init__(self, master, store: GameStore | None = None) -> None:
         super().__init__(master)
         self.title("Game Analyzer — History")
-        self.geometry("980x720")
+        self.geometry("980x760")
         self.store = store or GameStore()
         self.game_ids: list[str] = []
         self.index = 0
@@ -44,6 +45,22 @@ class HistoryWindow(ctk.CTkToplevel):
             info, text="Guess: —", font=("Segoe UI", 16), anchor="w"
         )
         self.guess_label.pack(fill="x", padx=12, pady=(0, 2))
+        self.conf_r2_label = ctk.CTkLabel(
+            info, text="R2 confidence: —", font=("Consolas", 13), anchor="w"
+        )
+        self.conf_r2_label.pack(fill="x", padx=12, pady=(0, 2))
+        self.conf_r3_label = ctk.CTkLabel(
+            info, text="R3 confidence: —", font=("Consolas", 13), anchor="w"
+        )
+        self.conf_r3_label.pack(fill="x", padx=12, pady=(0, 2))
+        self.high_stats_label = ctk.CTkLabel(
+            info,
+            text="Confidence accuracy: computing…",
+            font=("Segoe UI", 13),
+            anchor="w",
+            text_color="#58a6ff",
+        )
+        self.high_stats_label.pack(fill="x", padx=12, pady=(4, 2))
         self.meta_label = ctk.CTkLabel(
             info, text="", font=("Consolas", 13), anchor="w", justify="left"
         )
@@ -52,19 +69,36 @@ class HistoryWindow(ctk.CTkToplevel):
         self.shots = ctk.CTkScrollableFrame(self, label_text="Screenshots")
         self.shots.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
+        self._stats_job = None
         self.reload()
 
     def reload(self) -> None:
         self.game_ids = self.store.list_game_ids()
+        self.high_stats_label.configure(text="Confidence accuracy: computing…")
+        if self._stats_job is not None:
+            try:
+                self.after_cancel(self._stats_job)
+            except Exception:
+                pass
+        self._stats_job = self.after(150, self._refresh_high_stats)
         if not self.game_ids:
             self.header.configure(text="No saved games yet")
             self.winner_label.configure(text="Winner: —")
             self.guess_label.configure(text="Guess: —")
+            self.conf_r2_label.configure(text="R2 confidence: —")
+            self.conf_r3_label.configure(text="R3 confidence: —")
             self.meta_label.configure(text="Capture a complete game first.")
             self._clear_shots()
             return
         self.index = len(self.game_ids) - 1
         self.show()
+
+    def _refresh_high_stats(self) -> None:
+        self._stats_job = None
+        report = self.store.confidence_accuracy_report(simulations=200)
+        self.high_stats_label.configure(
+            text=f"Confidence accuracy  ·  {report.format_summary()}"
+        )
 
     def prev(self) -> None:
         if not self.game_ids:
@@ -99,6 +133,17 @@ class HistoryWindow(ctk.CTkToplevel):
             locked_draw_rounds=len(game.guess_draw_cards) // 3 if game.guess_draw_cards else 0,
         )
         self.guess_label.configure(text=self._guess_text(outcome, winner))
+
+        snap2, snap3 = self.store.confidence_snapshots_for(game_id, simulations=500)
+        self.conf_r2_label.configure(text=format_round_snapshot(snap2))
+        self.conf_r3_label.configure(text=format_round_snapshot(snap3))
+        self.conf_r2_label.configure(
+            text_color="#7ee787" if snap2.is_strong else ("#e6edf3" if snap2.ready else "#8b949e")
+        )
+        self.conf_r3_label.configure(
+            text_color="#7ee787" if snap3.is_strong else ("#e6edf3" if snap3.ready else "#8b949e")
+        )
+
         draw_note = (
             f"draws saved {len(game.draw_cards)} total"
             f" · locked guess uses {len(game.guess_draw_cards)}"

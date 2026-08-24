@@ -131,6 +131,7 @@ class GameStore:
         self.path = path or DEFAULT_DB
         self.root = root or ROOT
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._confidence_report_cache: tuple[tuple[object, ...], object] | None = None
         with self._connect() as con:
             con.executescript(_SCHEMA)
             self._ensure_guess_columns(con)
@@ -323,6 +324,70 @@ class GameStore:
                 )
             )
         return guess_accuracy(records)
+
+    def _finished_game_inputs(
+        self,
+    ) -> list[tuple[str | None, tuple[tuple[str, ...], ...], tuple[str, ...]]]:
+        rows: list[tuple[str | None, tuple[tuple[str, ...], ...], tuple[str, ...]]] = []
+        for game_id in self.list_game_ids():
+            game = self.get_game(game_id)
+            if game is None or not game.winner_suit:
+                continue
+            draws = game.draw_cards or game.guess_draw_cards
+            if not draws:
+                continue
+            rows.append((game.winner_suit, game.handicap_cards, draws))
+        return rows
+
+    def confidence_accuracy_report(self, *, simulations: int = 400, seed: int = 42):
+        """HIGH and VERY_HIGH hit-rates at round 2 and round 3 on finished games."""
+        from game_analyzer.confidence_stats import ConfidenceAccuracyReport, build_accuracy_report
+
+        rows = self._finished_game_inputs()
+        fingerprint = tuple(
+            (winner or "", len(draws), len(handicap)) for winner, handicap, draws in rows
+        )
+        cache_key = (str(self.path), fingerprint, simulations, seed)
+        cached = self._confidence_report_cache
+        if cached is not None and cached[0] == cache_key:
+            return cached[1]  # type: ignore[return-value]
+        report = build_accuracy_report(rows, simulations=simulations, seed=seed)
+        self._confidence_report_cache = (cache_key, report)
+        return report
+
+    def confidence_snapshots_for(
+        self,
+        game_id: str,
+        *,
+        simulations: int = 600,
+        seed: int | None = None,
+    ):
+        """Round-2 and round-3 confidence for one stored game (History)."""
+        from game_analyzer.confidence_stats import RoundConfidenceSnapshot, snapshot_at_round
+
+        game = self.get_game(game_id)
+        empty2 = RoundConfidenceSnapshot(draw_rounds=2, result=None, correct=None)
+        empty3 = RoundConfidenceSnapshot(draw_rounds=3, result=None, correct=None)
+        if game is None:
+            return empty2, empty3
+        draws = game.draw_cards or game.guess_draw_cards
+        snap2 = snapshot_at_round(
+            game.handicap_cards,
+            draws,
+            draw_rounds=2,
+            winner_suit=game.winner_suit,
+            simulations=simulations,
+            seed=seed,
+        )
+        snap3 = snapshot_at_round(
+            game.handicap_cards,
+            draws,
+            draw_rounds=3,
+            winner_suit=game.winner_suit,
+            simulations=simulations,
+            seed=(seed + 1) if seed is not None else None,
+        )
+        return snap2, snap3
 
     def pre_race_outcome_for(self, game_id: str) -> PreRaceOutcome | None:
         game = self.get_game(game_id)

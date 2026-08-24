@@ -11,9 +11,8 @@ from game_analyzer.alerts import alert_settings_from_config, confidence_summary_
 from game_analyzer.confidence import ConfidenceLevel, ConfidenceResult, evaluate_confidence, level_at_least
 from game_analyzer.race_values import race_snapshot, suits_match
 from game_analyzer.store import GameStore
-from game_analyzer.vision import draw_table_overlay, extract_real, read_image
+from game_analyzer.vision import draw_table_overlay, extract_real
 
-REAL_DIR_NAME = "fixtures/real"
 SUIT_STYLES = {
     "Spades": {"symbol": "♠", "color": "#31c96b"},
     "Hearts": {"symbol": "♥", "color": "#ff5a67"},
@@ -21,23 +20,36 @@ SUIT_STYLES = {
     "Diamonds": {"symbol": "♦", "color": "#f2c94c"},
 }
 
+# UI palette
+UI_BG = "#0f1117"
+UI_PANEL = "#181b22"
+UI_PANEL_ALT = "#1f2430"
+UI_BORDER = "#2d3340"
+UI_TEXT = "#e6edf3"
+UI_MUTED = "#8b949e"
+UI_ACCENT = "#58a6ff"
+UI_SUCCESS = "#3fb950"
+UI_WARN = "#d4a72c"
+UI_FONT = ("Segoe UI", 12)
+UI_FONT_SM = ("Segoe UI", 11)
+UI_FONT_MONO = ("Consolas", 11)
+UI_FONT_TITLE = ("Segoe UI", 12, "bold")
+UI_FONT_HEADING = ("Segoe UI", 13, "bold")
+
 
 class DemoApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Game Analyzer — your race screenshots")
-        # Keep default size under typical laptop usable height (~738 on 1366x768).
-        # A minsize taller than the screen blocks the WM maximize button.
+        self.title("Game Analyzer")
         self.geometry("900x700")
         self.minsize(800, 560)
         ctk.set_appearance_mode("dark")
+        self.configure(fg_color=UI_BG)
 
         self.config_data = load_config()
         self.alert_settings = alert_settings_from_config(self.config_data)
         root = Path(__file__).resolve().parent.parent
         self.store = GameStore(root=root)
-        self.paths = sorted((root / REAL_DIR_NAME).glob("*.png"))
-        self.index = 0
 
         self.looping = False
         self.after_id = None
@@ -47,60 +59,85 @@ class DemoApp(ctk.CTk):
         self._preview_rgb = None
         self._window_width = 900
 
-        nav = ctk.CTkFrame(self)
-        nav.pack(fill="x", padx=12, pady=(8, 4))
-        ctk.CTkButton(nav, text="Previous", width=120, command=self.prev).pack(side="left", padx=6)
-        ctk.CTkButton(nav, text="Next", width=120, command=self.next).pack(side="left", padx=6)
-        ctk.CTkButton(nav, text="Start capture", width=140, command=self.start_loop).pack(
-            side="left", padx=6
+        toolbar = ctk.CTkFrame(self, fg_color=UI_PANEL, corner_radius=8, border_width=1, border_color=UI_BORDER)
+        toolbar.pack(fill="x", padx=12, pady=(10, 6))
+        nav = ctk.CTkFrame(toolbar, fg_color="transparent")
+        nav.pack(fill="x", padx=10, pady=8)
+        btn_style = {"height": 32, "font": UI_FONT, "corner_radius": 6}
+        ctk.CTkButton(nav, text="Start capture", width=120, command=self.start_loop, **btn_style).pack(
+            side="left", padx=(0, 6)
         )
-        ctk.CTkButton(nav, text="Stop", width=80, command=self.stop_loop).pack(side="left", padx=6)
+        ctk.CTkButton(nav, text="Stop", width=72, command=self.stop_loop, fg_color="#5a3030", hover_color="#7a4040", **btn_style).pack(
+            side="left", padx=(0, 6)
+        )
         self.history_win = None
-        ctk.CTkButton(nav, text="History", width=100, command=self.open_history).pack(
-            side="right", padx=6
+        ctk.CTkButton(nav, text="History", width=88, command=self.open_history, **btn_style).pack(side="right")
+        self.file_label = ctk.CTkLabel(
+            nav,
+            text="Start capture to begin",
+            font=UI_FONT_MONO,
+            text_color=UI_MUTED,
+            anchor="w",
         )
-        self.file_label = ctk.CTkLabel(nav, text="", font=("Consolas", 14))
-        self.file_label.pack(side="left", padx=12)
+        self.file_label.pack(side="left", fill="x", expand=True, padx=(12, 12))
+
+        self.header = ctk.CTkFrame(self, fg_color="transparent")
+        self.header.pack(fill="x", padx=12, pady=(0, 6))
 
         self.guess_stats = ctk.CTkLabel(
-            self,
+            self.header,
             text="",
-            font=("Segoe UI", 14),
+            font=UI_FONT,
             anchor="w",
             justify="left",
+            text_color=UI_MUTED,
         )
-        self.guess_stats.pack(fill="x", padx=12, pady=(0, 4))
+        self.guess_stats.pack(fill="x", pady=(0, 2))
+        self.confidence_stats = ctk.CTkLabel(
+            self.header,
+            text="Confidence accuracy  ·  computing…",
+            font=UI_FONT_SM,
+            anchor="w",
+            justify="left",
+            text_color=UI_MUTED,
+        )
+        self.confidence_stats.pack(fill="x", pady=(0, 4))
+        self._confidence_stats_job = None
         self._refresh_guess_stats()
+        self._schedule_confidence_stats()
 
         self.confidence_strip = ctk.CTkLabel(
-            self,
+            self.header,
             text="Confidence: —",
-            font=("Segoe UI", 13, "bold"),
-            text_color="#aaaaaa",
-            fg_color="#3d3d3d",
-            corner_radius=6,
+            font=UI_FONT_TITLE,
+            text_color=UI_MUTED,
+            fg_color=UI_PANEL,
+            corner_radius=8,
             anchor="w",
             justify="left",
             wraplength=860,
         )
-        self.confidence_strip.pack(fill="x", padx=12, pady=(0, 6))
+        self.confidence_strip.pack(fill="x", pady=(0, 4))
 
         self.alert_banner = ctk.CTkLabel(
-            self,
+            self.header,
             text="",
-            font=("Segoe UI", 14, "bold"),
-            text_color="#1a1a1a",
-            fg_color="#3d3d3d",
-            corner_radius=6,
+            font=UI_FONT_TITLE,
+            text_color="#0d1117",
+            fg_color=UI_SUCCESS,
+            corner_radius=8,
             anchor="w",
             justify="left",
             wraplength=860,
         )
-        self.alert_banner.pack(fill="x", padx=12, pady=(0, 6))
-        self.alert_banner.pack_forget()
         self._alert_banner_visible = False
 
-        self.main_scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self.main_scroll = ctk.CTkScrollableFrame(
+            self,
+            fg_color="transparent",
+            scrollbar_button_color=UI_PANEL_ALT,
+            scrollbar_button_hover_color=UI_BORDER,
+        )
         self.main_scroll.pack(fill="both", expand=True, padx=12, pady=(0, 6))
 
         top = ctk.CTkFrame(self.main_scroll, fg_color="transparent")
@@ -111,15 +148,32 @@ class DemoApp(ctk.CTk):
         left_col = ctk.CTkFrame(top, fg_color="transparent")
         left_col.grid(row=0, column=0, rowspan=2, sticky="nw", padx=(0, 12))
 
-        self.preview = ctk.CTkLabel(left_col, text="")
-        self.preview.grid(row=0, column=0, sticky="nw")
+        self.preview_frame = ctk.CTkFrame(
+            left_col,
+            fg_color=UI_PANEL,
+            corner_radius=8,
+            border_width=1,
+            border_color=UI_BORDER,
+        )
+        self.preview_frame.grid(row=0, column=0, sticky="nw")
+        self.preview = ctk.CTkLabel(self.preview_frame, text="", fg_color="transparent")
+        self.preview.pack(padx=4, pady=4)
 
-        self.results_frame = ctk.CTkFrame(left_col, fg_color=("#2b2b2b", "#1e1e1e"), corner_radius=8)
+        self.results_frame = ctk.CTkFrame(
+            left_col,
+            fg_color=UI_PANEL,
+            corner_radius=8,
+            border_width=1,
+            border_color=UI_BORDER,
+        )
         self.results_frame.grid(row=1, column=0, sticky="nw", pady=(8, 0))
         self.results_frame.grid_propagate(False)
-        ctk.CTkLabel(self.results_frame, text="Fetched data", font=("Segoe UI", 13, "bold")).pack(
-            anchor="w", padx=12, pady=(8, 4)
-        )
+        ctk.CTkLabel(
+            self.results_frame,
+            text="Session data",
+            font=UI_FONT_HEADING,
+            text_color=UI_TEXT,
+        ).pack(anchor="w", padx=12, pady=(10, 6))
         fetched_rows = ctk.CTkFrame(self.results_frame, fg_color="transparent")
         fetched_rows.pack(fill="x", padx=12, pady=(0, 10))
         self.result_state = self._result_row(fetched_rows, "Race state")
@@ -130,46 +184,77 @@ class DemoApp(ctk.CTk):
         self.result_session = self._result_row(fetched_rows, "Session")
 
         right_col = ctk.CTkFrame(top, fg_color="transparent")
-        right_col.grid(row=0, column=1, rowspan=2, sticky="ne")
+        right_col.grid(row=0, column=1, rowspan=2, sticky="nsew")
+        top.grid_columnconfigure(1, weight=1, minsize=320)
 
-        remaining_panel = ctk.CTkFrame(right_col, fg_color=("#252525", "#181818"), corner_radius=8)
+        remaining_panel = ctk.CTkFrame(
+            right_col,
+            fg_color=UI_PANEL,
+            corner_radius=8,
+            border_width=1,
+            border_color=UI_BORDER,
+        )
         remaining_panel.pack(fill="x", pady=(0, 8))
         ctk.CTkLabel(
             remaining_panel,
-            text="Win chance (expected finish + track blend)",
-            font=("Segoe UI", 13, "bold"),
-        ).pack(anchor="w", padx=12, pady=(10, 4))
+            text="Win chance",
+            font=UI_FONT_HEADING,
+            text_color=UI_TEXT,
+        ).pack(anchor="w", padx=12, pady=(10, 2))
+        ctk.CTkLabel(
+            remaining_panel,
+            text="Expected finish + track blend",
+            font=UI_FONT_SM,
+            text_color=UI_MUTED,
+        ).pack(anchor="w", padx=12, pady=(0, 6))
         self.remaining_rows: dict[str, ctk.CTkLabel] = {}
+        self.remaining_panel = remaining_panel
         for suit_name in ["Spades", "Hearts", "Clubs", "Diamonds"]:
             style = SUIT_STYLES[suit_name]
             row = ctk.CTkFrame(remaining_panel, fg_color="transparent")
-            row.pack(fill="x", padx=12, pady=2)
+            row.pack(fill="x", padx=12, pady=3)
             ctk.CTkLabel(
                 row,
                 text=f"{style['symbol']} {suit_name}",
                 text_color=style["color"],
                 font=("Segoe UI", 13, "bold"),
-                width=110,
                 anchor="w",
-            ).pack(side="left")
-            value = ctk.CTkLabel(row, text="—", font=("Consolas", 14), anchor="w")
-            value.pack(side="left", padx=(8, 0))
+            ).pack(anchor="w")
+            value = ctk.CTkLabel(
+                row,
+                text="—",
+                font=UI_FONT_MONO,
+                anchor="nw",
+                justify="left",
+                wraplength=340,
+                text_color=UI_TEXT,
+            )
+            value.pack(fill="x", anchor="w", pady=(2, 0))
             self.remaining_rows[suit_name] = value
         self.remaining_favourite = ctk.CTkLabel(
             remaining_panel,
             text="",
-            font=("Segoe UI", 12),
-            text_color="#aaaaaa",
+            font=UI_FONT_SM,
+            text_color=UI_MUTED,
             wraplength=300,
             justify="left",
         )
         self.remaining_favourite.pack(anchor="w", padx=12, pady=(6, 10))
 
-        table_panel = ctk.CTkFrame(right_col, fg_color=("#252525", "#181818"), corner_radius=8)
-        table_panel.pack(fill="x")
-        ctk.CTkLabel(table_panel, text="Generated table", font=("Segoe UI", 13, "bold")).pack(
-            anchor="w", padx=12, pady=(10, 6)
+        table_panel = ctk.CTkFrame(
+            right_col,
+            fg_color=UI_PANEL,
+            corner_radius=8,
+            border_width=1,
+            border_color=UI_BORDER,
         )
+        table_panel.pack(fill="x")
+        ctk.CTkLabel(
+            table_panel,
+            text="Card table",
+            font=UI_FONT_HEADING,
+            text_color=UI_TEXT,
+        ).pack(anchor="w", padx=12, pady=(10, 6))
         self.card_table = ctk.CTkFrame(table_panel, fg_color="transparent")
         self.card_table.pack(fill="x", padx=12, pady=(0, 10))
         self.card_row_frames: dict[str, ctk.CTkFrame] = {}
@@ -194,27 +279,17 @@ class DemoApp(ctk.CTk):
         self.status = ctk.CTkLabel(
             self.main_scroll,
             text="",
-            font=("Consolas", 12),
+            font=UI_FONT_MONO,
             justify="left",
             anchor="w",
             wraplength=860,
+            text_color=UI_MUTED,
         )
-        self.status.pack(fill="x", pady=(0, 4))
-
-        self.log = ctk.CTkTextbox(self, height=56)
-        self.log.pack(fill="x", padx=12, pady=(0, 10))
-        self.log.insert(
-            "end",
-            "Reads winner row (green) + handicap cards + the 3 move cards.\n"
-            "Fetched values appear in the panel under the screenshot.\n"
-            "Saved live images are clean unless draw_overlays=true.\n\n",
-        )
+        self.status.pack(fill="x", pady=(8, 4))
 
         # add="+" keeps CustomTkinter's own <Configure> handler intact
         self.bind("<Configure>", self._on_window_configure, add="+")
 
-        if self.paths:
-            self.show()
         self._refresh_layout_widths()
 
     def _left_column_width(self, window_width: int) -> int:
@@ -228,12 +303,20 @@ class DemoApp(ctk.CTk):
         height = max(140, int(width * 278 / 520))
         return width, height
 
+    def _right_column_width(self, window_width: int) -> int:
+        return max(300, window_width - self._left_column_width(window_width) - 56)
+
     def _refresh_layout_widths(self) -> None:
         left_w = self._left_column_width(self._window_width)
+        right_w = self._right_column_width(self._window_width)
         fetched_wrap = max(160, left_w - 120)
+        stats_wrap = max(260, right_w - 24)
         self.results_frame.configure(width=left_w)
         for label in self._result_value_labels:
             label.configure(wraplength=fetched_wrap)
+        for label in self.remaining_rows.values():
+            label.configure(wraplength=stats_wrap)
+        self.remaining_favourite.configure(wraplength=stats_wrap)
 
     def _refresh_preview_image(self) -> None:
         if self._preview_rgb is None:
@@ -252,8 +335,6 @@ class DemoApp(ctk.CTk):
         self.status.configure(wraplength=wrap)
         self.confidence_strip.configure(wraplength=wrap)
         self.alert_banner.configure(wraplength=wrap)
-        right_wrap = max(220, min(360, event.width - self._left_column_width(event.width) - 48))
-        self.remaining_favourite.configure(wraplength=right_wrap)
         self._refresh_layout_widths()
         self._refresh_preview_image()
 
@@ -261,27 +342,51 @@ class DemoApp(ctk.CTk):
         stats = self.store.pre_race_guess_accuracy()
         if stats.total == 0:
             self.guess_stats.configure(
-                text="Guess accuracy: no scored games yet (need winner + 2 draw rounds)",
-                text_color="#888888",
+                text="Accuracy  —  no scored games yet",
+                text_color=UI_MUTED,
             )
-            return
-        self.guess_stats.configure(
-            text=(
-                f"Guess accuracy: {stats.correct}/{stats.total} "
-                f"({stats.percent:.0f}%) — locked guess uses 2–3 draw rounds (never winner OCR)"
-            ),
-            text_color="#58a6ff" if stats.percent and stats.percent >= 50 else "#ff9f43",
+        else:
+            self.guess_stats.configure(
+                text=(
+                    f"Accuracy  {stats.correct}/{stats.total}  ({stats.percent:.0f}%)"
+                    f"  ·  guess locks at 2–3 draw rounds"
+                ),
+                text_color=UI_ACCENT if stats.percent and stats.percent >= 50 else UI_WARN,
+            )
+        self._schedule_confidence_stats()
+
+    def _schedule_confidence_stats(self) -> None:
+        if self._confidence_stats_job is not None:
+            try:
+                self.after_cancel(self._confidence_stats_job)
+            except Exception:
+                pass
+        self._confidence_stats_job = self.after(200, self._refresh_confidence_stats)
+
+    def _refresh_confidence_stats(self) -> None:
+        self._confidence_stats_job = None
+        report = self.store.confidence_accuracy_report(simulations=200)
+        strong = max(
+            report.round2.high.percent or 0,
+            report.round2.very_high.percent or 0,
+            report.round3.high.percent or 0,
+            report.round3.very_high.percent or 0,
+        )
+        self.confidence_stats.configure(
+            text=f"Confidence accuracy  ·  {report.format_summary()}",
+            text_color="#7ee787" if strong >= 70 else UI_MUTED,
         )
 
     def _result_row(self, parent: ctk.CTkFrame, title: str) -> ctk.CTkLabel:
         row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", pady=1)
+        row.pack(fill="x", pady=2)
         ctk.CTkLabel(
             row,
-            text=f"{title}:",
+            text=title,
             width=100,
             anchor="nw",
-            font=("Segoe UI", 12),
+            font=UI_FONT_SM,
+            text_color=UI_MUTED,
         ).pack(side="left", anchor="n")
         value = ctk.CTkLabel(
             row,
@@ -289,7 +394,8 @@ class DemoApp(ctk.CTk):
             anchor="nw",
             justify="left",
             wraplength=760,
-            font=("Consolas", 13),
+            font=UI_FONT_MONO,
+            text_color=UI_TEXT,
         )
         value.pack(side="left", fill="x", expand=True, padx=(8, 0), anchor="n")
         self._result_value_labels.append(value)
@@ -299,21 +405,18 @@ class DemoApp(ctk.CTk):
         self,
         level: ConfidenceLevel,
         *,
-        alert_fired: bool,
         would_alert: bool,
     ) -> tuple[str, str]:
-        if alert_fired:
-            return "#1a1a1a", "#2ea043"
         if would_alert:
-            return "#1a1a1a", "#d4a72c"
+            return UI_TEXT, "#2d3a1f"
         styles = {
-            ConfidenceLevel.NONE: ("#aaaaaa", "#3d3d3d"),
-            ConfidenceLevel.LOW: ("#ff9f43", "#3d2a1a"),
-            ConfidenceLevel.MEDIUM: ("#58a6ff", "#1a2a3d"),
+            ConfidenceLevel.NONE: (UI_MUTED, UI_PANEL),
+            ConfidenceLevel.LOW: ("#ffb86c", "#2d2218"),
+            ConfidenceLevel.MEDIUM: (UI_ACCENT, "#1a2a3d"),
             ConfidenceLevel.HIGH: ("#7ee787", "#1a3d2a"),
-            ConfidenceLevel.VERY_HIGH: ("#7ee787", "#1a3d2a"),
+            ConfidenceLevel.VERY_HIGH: ("#aff5b4", "#1a3d2a"),
         }
-        return styles.get(level, ("#aaaaaa", "#3d3d3d"))
+        return styles.get(level, (UI_MUTED, UI_PANEL))
 
     def _update_confidence_strip(
         self,
@@ -326,8 +429,8 @@ class DemoApp(ctk.CTk):
         summary = confidence_summary_for_ui(
             confidence,
             settings=self.alert_settings,
-            alert_fired=alert_fired,
-            alert_kind=alert_kind,
+            alert_fired=False,
+            alert_kind=None,
         )
         would_alert = (
             self.alert_settings.enabled
@@ -335,37 +438,36 @@ class DemoApp(ctk.CTk):
             and level_at_least(confidence.level, self.alert_settings.min_level)
             and not alert_fired
         )
-        if alert_fired and alert_message:
-            text = f"ALERT ({alert_kind}): {alert_message}"
-        elif not confidence.ready:
-            text = "Confidence: — (need 2 draw rounds)"
+        if not confidence.ready:
+            text = "  Confidence  —  (need 2 draw rounds)"
         else:
-            text = f"Confidence: {summary}"
+            text = f"  Confidence  ·  {summary}"
             if not self.alert_settings.enabled:
-                text += "  ·  client alerts off (set alerts.enabled in config.json)"
-        fg, bg = self._confidence_strip_style(
-            confidence.level,
-            alert_fired=alert_fired,
-            would_alert=would_alert,
-        )
+                text += "  ·  alerts off"
+        fg, bg = self._confidence_strip_style(confidence.level, would_alert=would_alert)
         self.confidence_strip.configure(text=text, text_color=fg, fg_color=bg)
 
+    def _short_alert_text(self, message: str, kind: str | None) -> str:
+        cleaned = message
+        if kind:
+            cleaned = cleaned.replace(f"[{kind.upper()}]", "").strip(" —")
+        return cleaned
+
     def _set_alert_banner(self, *, visible: bool, text: str = "", kind: str | None = None) -> None:
-        if visible:
+        if visible and text:
+            short = self._short_alert_text(text, kind)
+            label = kind.upper() if kind else "ALERT"
             self.alert_banner.configure(
-                text=f"ALERT ({kind}): {text}" if kind else text,
-                fg_color="#2ea043",
+                text=f"  {label}  ·  {short}",
+                fg_color=UI_SUCCESS if kind != "cancel" else "#8b3a3a",
+                text_color="#0d1117" if kind != "cancel" else UI_TEXT,
             )
             if not self._alert_banner_visible:
-                self.main_scroll.pack_forget()
-                self.alert_banner.pack(fill="x", padx=12, pady=(0, 6))
-                self.main_scroll.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+                self.alert_banner.pack(fill="x", pady=(0, 4))
                 self._alert_banner_visible = True
         elif self._alert_banner_visible:
             self.alert_banner.pack_forget()
             self._alert_banner_visible = False
-            if not self.main_scroll.winfo_ismapped():
-                self.main_scroll.pack(fill="both", expand=True, padx=12, pady=(0, 6))
 
     def _set_results(
         self,
@@ -441,9 +543,9 @@ class DemoApp(ctk.CTk):
         else:
             self.result_confidence.configure(text="—")
             self.confidence_strip.configure(
-                text="Confidence: — (handicap or draw cards not readable)",
-                text_color="#aaaaaa",
-                fg_color="#3d3d3d",
+                text="Confidence  —  (waiting for cards)",
+                text_color=UI_MUTED,
+                fg_color=UI_PANEL,
             )
         if alert_fired and alert_message:
             self._set_alert_banner(visible=True, text=alert_message, kind=alert_kind)
@@ -502,17 +604,18 @@ class DemoApp(ctk.CTk):
             )
             is_preview = favourite is None and suit_name == preview and snap.draw_rounds_used > 0
             if snap.draw_rounds_used == 0:
-                text = f"deck {deck_p * 100:.0f}% · score {combined * 100:.0f}%"
+                text = f"score {combined * 100:.0f}%  ·  deck {deck_p * 100:.0f}%"
             elif favourite:
                 text = (
-                    f"deck {deck_p * 100:.0f}% · track {track_p * 100:.0f}% · "
-                    f"finish {expected_p * 100:.0f}% · combo {combo_p * 100:.0f}% · "
-                    f"score {combined * 100:.0f}%"
+                    f"score {combined * 100:.0f}%  ·  "
+                    f"deck {deck_p * 100:.0f}%  ·  track {track_p * 100:.0f}%  ·  "
+                    f"finish {expected_p * 100:.0f}%  ·  combo {combo_p * 100:.0f}%"
                 )
             else:
                 text = (
-                    f"deck {deck_p * 100:.0f}% · track {track_p * 100:.0f}% · "
-                    f"finish {expected_p * 100:.0f}% · score {combined * 100:.0f}%"
+                    f"score {combined * 100:.0f}%  ·  "
+                    f"deck {deck_p * 100:.0f}%  ·  track {track_p * 100:.0f}%  ·  "
+                    f"finish {expected_p * 100:.0f}%"
                 )
             if is_best and favourite:
                 color = SUIT_STYLES[suit_name]["color"]
@@ -623,18 +726,6 @@ class DemoApp(ctk.CTk):
         self.history_win.focus()
         self._refresh_guess_stats()
 
-    def prev(self) -> None:
-        if not self.paths:
-            return
-        self.index = (self.index - 1) % len(self.paths)
-        self.show()
-
-    def next(self) -> None:
-        if not self.paths:
-            return
-        self.index = (self.index + 1) % len(self.paths)
-        self.show()
-
     def start_loop(self) -> None:
         if self.looping:
             return
@@ -699,11 +790,6 @@ class DemoApp(ctk.CTk):
         self._refresh_guess_stats()
         self.after_id = self.after(int(decision.next_wait_seconds * 1000), self._loop_tick)
 
-    def show(self) -> None:
-        path = self.paths[self.index]
-        frame = read_image(path)
-        self.show_frame(frame, f"{self.index + 1}/{len(self.paths)}  {path.name}")
-
     def show_frame(
         self,
         frame,
@@ -755,5 +841,3 @@ class DemoApp(ctk.CTk):
         )
         self.file_label.configure(text=label)
         self.status.configure(text=line)
-        self.log.insert("end", line + "\n")
-        self.log.see("end")
