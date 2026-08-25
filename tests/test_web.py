@@ -185,6 +185,14 @@ def test_similar_and_stats_api(tmp_path: Path):
     shots = client.get("/api/history/100/shots").json()
     assert len(shots["frames"]) >= 1
     assert shots["frames"][0]["url"].startswith("/shot/100/")
+    live = client.get("/api/live").json()
+    assert "alerts" in live
+    alerts = client.get("/api/alerts").json()
+    assert "latest" in alerts
+    assert "enabled" in alerts
+    page = client.get("/")
+    assert "Enable alert sound" in page.text
+    assert 'data-alert-dock' in page.text
 
 
 def test_api_games_and_game_payload(tmp_path: Path):

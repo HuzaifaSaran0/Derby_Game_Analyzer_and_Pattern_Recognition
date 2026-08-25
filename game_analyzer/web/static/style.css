@@ -137,6 +137,70 @@ a { color: var(--accent); }
   border-color: #2d5a3a;
 }
 
+.alert-dock {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+}
+.alert-dock-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.alert-dock-status {
+  font-size: 0.82rem;
+}
+.alert-dock-hint {
+  margin: 8px 0 0;
+  font-size: 0.78rem;
+}
+.btn.is-on {
+  background: var(--success);
+  color: #0d1117;
+  border-color: transparent;
+}
+.alert-banner {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border));
+  background: color-mix(in srgb, var(--warn) 14%, var(--panel));
+}
+.alert-banner[hidden] { display: none !important; }
+.alert-banner.is-bet {
+  border-color: color-mix(in srgb, var(--success) 55%, var(--border));
+  background: color-mix(in srgb, var(--success) 14%, var(--panel));
+}
+.alert-banner.is-upgrade {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+}
+.alert-banner.is-cancel {
+  border-color: color-mix(in srgb, #ff5a67 55%, var(--border));
+  background: color-mix(in srgb, #ff5a67 12%, var(--panel));
+}
+.alert-banner.flash {
+  animation: alert-flash 0.7s ease;
+}
+@keyframes alert-flash {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.015); }
+  100% { transform: scale(1); }
+}
+.alert-kind {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.alert-text {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.35;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
 /* Idle hero — must respect [hidden] (display:flex otherwise wins) */
 .idle-hero {
   text-align: center;

@@ -164,6 +164,50 @@ def append_alert_log(path: Path, message: str) -> None:
         handle.write(f"{stamp}  {message}\n")
 
 
+def parse_alert_log_line(line: str) -> dict[str, str] | None:
+    """Parse ``{iso}  {message}`` rows from ``alerts.log``."""
+    text = line.strip()
+    if not text or text.startswith("WEBHOOK FAILED"):
+        return None
+    # Prefer splitting on first double-space after the timestamp.
+    stamp = ""
+    message = text
+    if "  " in text:
+        stamp, message = text.split("  ", 1)
+        stamp = stamp.strip()
+        message = message.strip()
+    if message.startswith("WEBHOOK FAILED"):
+        return None
+    kind = "alert"
+    if message.startswith("[") and "]" in message:
+        kind = message[1 : message.index("]")].lower()
+    return {"id": f"{stamp}|{message}", "at": stamp, "kind": kind, "message": message}
+
+
+def read_recent_alerts(path: Path, *, limit: int = 20) -> list[dict[str, str]]:
+    """Newest-first alert entries from the log file (empty if missing)."""
+    if limit <= 0 or not path.is_file():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    entries: list[dict[str, str]] = []
+    for line in reversed(lines):
+        parsed = parse_alert_log_line(line)
+        if parsed is None:
+            continue
+        entries.append(parsed)
+        if len(entries) >= limit:
+            break
+    return entries
+
+
+def latest_alert(path: Path) -> dict[str, str] | None:
+    rows = read_recent_alerts(path, limit=1)
+    return rows[0] if rows else None
+
+
 def post_webhook(url: str, message: str) -> None:
     payload = json.dumps({"text": message}).encode("utf-8")
     request = urllib.request.Request(

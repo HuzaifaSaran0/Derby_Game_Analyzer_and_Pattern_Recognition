@@ -7,6 +7,8 @@ from game_analyzer.alerts import (
     compute_alert_transition,
     deliver_alert,
     format_alert_message,
+    parse_alert_log_line,
+    read_recent_alerts,
 )
 from game_analyzer.confidence import ConfidenceLevel, ConfidenceResult, evaluate_confidence, level_at_least
 from game_analyzer.models import ExtractionResult, RaceState
@@ -275,3 +277,23 @@ def test_format_alert_message_includes_pick():
     text = format_alert_message(game_id="7", confidence=confidence, kind="bet")
     assert "Pick Spades" in text
     assert "Game 7" in text
+
+
+def test_read_recent_alerts_parses_log(tmp_path: Path):
+    log_path = tmp_path / "alerts.log"
+    log_path.write_text(
+        "2026-08-25T15:00:00+00:00  [BET] — Game 1 — Pick Spades\n"
+        "2026-08-25T15:01:00+00:00  WEBHOOK FAILED: boom — ignore\n"
+        "2026-08-25T15:02:00+00:00  [UPGRADE] — Game 1 — Pick Spades\n",
+        encoding="utf-8",
+    )
+    rows = read_recent_alerts(log_path, limit=5)
+    assert len(rows) == 2
+    assert rows[0]["kind"] == "upgrade"
+    assert rows[1]["kind"] == "bet"
+    parsed = parse_alert_log_line(
+        "2026-08-25T15:00:00+00:00  [BET] — Game 1 — Pick Spades"
+    )
+    assert parsed is not None
+    assert parsed["kind"] == "bet"
+    assert "Pick Spades" in parsed["message"]

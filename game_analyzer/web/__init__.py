@@ -8,6 +8,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from game_analyzer.alerts import (
+    alert_settings_from_config,
+    read_recent_alerts,
+)
+from game_analyzer.config import load_config
 from game_analyzer.confidence import evaluate_confidence, format_confidence_text
 from game_analyzer.confidence_stats import format_round_snapshot
 from game_analyzer.race_values import pre_race_outcome, race_snapshot
@@ -32,7 +37,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "15"
+STATIC_VER = "16"
 
 
 def _neighbors(game_ids: list[str], game_id: str) -> tuple[str | None, str | None]:
@@ -266,6 +271,17 @@ def _stats_payload(store: GameStore) -> dict:
     }
 
 
+def _alerts_payload(*, limit: int = 10) -> dict:
+    settings = alert_settings_from_config(load_config())
+    recent = read_recent_alerts(settings.log_path, limit=limit)
+    return {
+        "enabled": settings.enabled,
+        "min_level": settings.min_level.value,
+        "latest": recent[0] if recent else None,
+        "recent": recent,
+    }
+
+
 def _similar_payload(store: GameStore, *, exact_only: bool = False) -> dict:
     corpus = store.similarity_corpus()
     clusters = store.similarity_clusters(exact_only=exact_only)
@@ -365,15 +381,27 @@ def create_app(store: GameStore | None = None) -> FastAPI:
     @app.get("/api/live")
     def api_live():
         games = store.list_games()
+        alerts = _alerts_payload(limit=5)
         if not games:
-            return JSONResponse({"ready": False, "stats": _stats_payload(store)}, headers=NO_CACHE)
+            return JSONResponse(
+                {"ready": False, "stats": _stats_payload(store), "alerts": alerts},
+                headers=NO_CACHE,
+            )
         latest_id = games[0]["game_id"]
         payload = _game_payload(store, latest_id)
         if payload is None:
-            return JSONResponse({"ready": False, "stats": _stats_payload(store)}, headers=NO_CACHE)
+            return JSONResponse(
+                {"ready": False, "stats": _stats_payload(store), "alerts": alerts},
+                headers=NO_CACHE,
+            )
         payload["ready"] = True
         payload["stats"] = _stats_payload(store)
+        payload["alerts"] = alerts
         return JSONResponse(payload, headers=NO_CACHE)
+
+    @app.get("/api/alerts")
+    def api_alerts(limit: int = Query(10, ge=1, le=50)):
+        return JSONResponse(_alerts_payload(limit=limit), headers=NO_CACHE)
 
     @app.get("/api/similar")
     def api_similar(exact_only: bool = Query(False)):
