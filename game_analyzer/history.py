@@ -73,7 +73,7 @@ class HistoryWindow(ctk.CTkToplevel):
         self.reload()
 
     def reload(self) -> None:
-        self.game_ids = self.store.list_game_ids()
+        self.game_ids = self.store.list_game_ids(finished_only=True)
         self.high_stats_label.configure(text="Confidence accuracy: computing…")
         if self._stats_job is not None:
             try:

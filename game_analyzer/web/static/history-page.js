@@ -235,9 +235,14 @@
     try {
       if (!gameId) {
         const list = await live.get("/games.json");
-        const games = list.games || [];
+        const games = (list.games || []).filter(function (g) {
+          return !!g.winner_suit;
+        });
         if (!games.length) {
-          live.stamp(true, "no games");
+          live.stamp(true, "no finished games");
+          document.querySelector("[data-game-pos]").textContent = "—";
+          document.querySelector("[data-winner]").textContent = "none yet";
+          document.querySelector("[data-guess]").textContent = "—";
           return;
         }
         gameId = games[0].game_id;

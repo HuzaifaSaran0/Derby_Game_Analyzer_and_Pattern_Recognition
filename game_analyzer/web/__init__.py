@@ -27,7 +27,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "12"
+STATIC_VER = "13"
 
 
 def _neighbors(game_ids: list[str], game_id: str) -> tuple[str | None, str | None]:
@@ -180,9 +180,19 @@ def _game_payload(store: GameStore, game_id: str, *, include_frames: bool = True
     game = store.get_game(game_id)
     if game is None:
         return None
-    ids = [g["game_id"] for g in store.list_games(newest_first=False)]
-    prev_id, next_id = _neighbors(ids, game_id)
-    latest_id = ids[-1] if ids else None
+    # History browses finished games only; live/game detail may still include in-progress.
+    ids = store.list_game_ids(finished_only=True)
+    if game.winner_suit and game_id in ids:
+        prev_id, next_id = _neighbors(ids, game_id)
+        latest_id = ids[-1] if ids else None
+        index = ids.index(game_id) + 1
+        total = len(ids)
+    else:
+        all_ids = [g["game_id"] for g in store.list_games(newest_first=False)]
+        prev_id, next_id = _neighbors(all_ids, game_id)
+        latest_id = all_ids[-1] if all_ids else None
+        index = all_ids.index(game_id) + 1 if game_id in all_ids else 0
+        total = len(all_ids)
     snap2, snap3 = store.confidence_snapshots_for(game_id, simulations=400)
     latest_frame = game.frames[-1] if game.frames else None
     frames = [
@@ -223,8 +233,8 @@ def _game_payload(store: GameStore, game_id: str, *, include_frames: bool = True
         "prev_id": prev_id,
         "next_id": next_id,
         "latest_id": latest_id,
-        "index": ids.index(game_id) + 1 if game_id in ids else 0,
-        "total": len(ids),
+        "index": index,
+        "total": total,
         "in_progress": game.winner_suit is None,
     }
 
@@ -312,7 +322,7 @@ def create_app(store: GameStore | None = None) -> FastAPI:
 
     @app.get("/history", response_class=HTMLResponse)
     def history_page(request: Request):
-        ids = store.list_game_ids()
+        ids = store.list_game_ids(finished_only=True)
         start_id = ids[-1] if ids else None
         return templates.TemplateResponse(
             request=request,
@@ -355,6 +365,11 @@ def create_app(store: GameStore | None = None) -> FastAPI:
 
     @app.get("/api/history/{game_id}")
     def api_history(game_id: str):
+        game = store.get_game(game_id)
+        if game is None:
+            raise HTTPException(status_code=404, detail="Game not found")
+        if not game.winner_suit:
+            raise HTTPException(status_code=404, detail="Unfinished game — not in History")
         # Skip frame URLs so Prev/Next stays fast; shots load on demand.
         payload = _game_payload(store, game_id, include_frames=False)
         if payload is None:

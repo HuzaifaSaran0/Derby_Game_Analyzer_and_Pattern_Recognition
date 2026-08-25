@@ -250,12 +250,33 @@ class GameStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def list_game_ids(self) -> list[str]:
+    def list_game_ids(self, *, finished_only: bool = False) -> list[str]:
         with self._connect(autocommit=True) as con:
-            rows = con.execute(
-                "SELECT game_id FROM games ORDER BY id ASC"
-            ).fetchall()
+            if finished_only:
+                rows = con.execute(
+                    "SELECT game_id FROM games WHERE winner_suit IS NOT NULL ORDER BY id ASC"
+                ).fetchall()
+            else:
+                rows = con.execute(
+                    "SELECT game_id FROM games ORDER BY id ASC"
+                ).fetchall()
         return [r["game_id"] for r in rows]
+
+    def delete_games_without_winner(self) -> int:
+        """Remove unfinished/abandoned games (no winner_suit)."""
+        deleted = 0
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT game_id FROM games WHERE winner_suit IS NULL"
+            ).fetchall()
+            for row in rows:
+                gid = row["game_id"]
+                con.execute("DELETE FROM frames WHERE game_id=?", (gid,))
+                con.execute("DELETE FROM games WHERE game_id=?", (gid,))
+                deleted += 1
+        self._similarity_corpus_cache = None
+        self._confidence_report_cache = None
+        return deleted
 
     def get_game(self, game_id: str, root: Path | None = None) -> StoredGame | None:
         root = root or self.root
