@@ -71,11 +71,10 @@ def _client(tmp_path: Path) -> TestClient:
 
 def test_home_lists_games(tmp_path: Path):
     client = _client(tmp_path)
-    response = client.get("/games")
+    response = client.get("/history")
     assert response.status_code == 200
-    assert "100" in response.text
-    assert "99" in response.text
-    assert "Clubs wins" in response.text
+    assert "History" in response.text
+    assert "All games" not in response.text
 
 
 def test_live_page(tmp_path: Path):
@@ -84,13 +83,14 @@ def test_live_page(tmp_path: Path):
     assert response.status_code == 200
     assert "Win chance" in response.text
     assert "/static/dashboard.js" in response.text
+    assert "All games" not in response.text
 
 
 def test_home_empty(tmp_path: Path):
     store = GameStore(tmp_path / "games.sqlite", root=tmp_path)
-    response = TestClient(create_app(store)).get("/games")
-    assert response.status_code == 200
-    assert "No games stored yet" in response.text
+    response = TestClient(create_app(store), follow_redirects=False).get("/games")
+    assert response.status_code in {302, 307}
+    assert response.headers.get("location") == "/history"
 
 
 def test_game_page_shows_table_and_shots(tmp_path: Path):
@@ -113,11 +113,12 @@ def test_game_page_shows_table_and_shots(tmp_path: Path):
 
 def test_home_includes_live_script(tmp_path: Path):
     client = _client(tmp_path)
-    response = client.get("/games")
-    assert "/static/home.js" in response.text
+    response = client.get("/history")
+    assert "/static/history-page.js" in response.text
     assert "/static/live.js" in response.text
     assert "/static/cards.js" in response.text
     assert "data-live-status" in response.text
+    assert "All games" not in response.text
 
 
 def test_similar_and_stats_api(tmp_path: Path):
@@ -133,6 +134,13 @@ def test_similar_and_stats_api(tmp_path: Path):
     assert "Similar" in page.text
     history = client.get("/history")
     assert history.status_code == 200
+    hist = client.get("/api/history/100").json()
+    assert hist["game_id"] == "100"
+    assert hist["shot_count"] >= 1
+    assert hist["frames"] == []
+    shots = client.get("/api/history/100/shots").json()
+    assert len(shots["frames"]) >= 1
+    assert shots["frames"][0]["url"].startswith("/shot/100/")
 
 
 def test_api_games_and_game_payload(tmp_path: Path):

@@ -3,15 +3,16 @@
 {% block page %}live{% endblock %}
 {% block content %}
 <section class="stats-bar">
-  <p class="stat-line" data-guess-stats>Accuracy  —  loading…</p>
-  <p class="stat-line stat-conf" data-confidence-stats>Confidence accuracy  ·  loading…</p>
+  <p class="stats-one-line">
+    <span data-guess-stats>Acc —</span>
+    <span class="stats-sep">·</span>
+    <span class="stat-conf" data-confidence-stats>loading…</span>
+  </p>
 </section>
 
-  <section class="panel confidence-strip" data-confidence-strip>
-  —
-</section>
+<section class="panel confidence-strip" data-confidence-strip>—</section>
 
-<section class="panel idle-hero" data-idle-hero hidden>
+<section class="panel idle-hero" data-idle-hero>
   <h2>Game Analyzer</h2>
   <p class="idle-cta">Press <strong>Start capture</strong> on the desktop app to begin.</p>
   <p class="idle-note">This page updates live from the laptop — preview, win chance, and card table appear after the first capture.</p>

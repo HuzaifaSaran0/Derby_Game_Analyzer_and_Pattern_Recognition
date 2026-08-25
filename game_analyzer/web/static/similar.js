@@ -5,6 +5,7 @@
 
   const list = document.querySelector("[data-sim-list]");
   const summary = document.querySelector("[data-sim-summary]");
+  const kindBanner = document.querySelector("[data-sim-kind]");
   const loading = document.querySelector("[data-sim-loading]");
   const empty = document.querySelector("[data-sim-empty]");
   const exactOnly = document.querySelector("[data-exact-only]");
@@ -12,7 +13,6 @@
   const lightbox = document.getElementById("lightbox");
   const lightboxImg = lightbox ? lightbox.querySelector("img") : null;
   const lightboxStatus = lightbox ? lightbox.querySelector(".lightbox-status") : null;
-  let lastSig = "";
 
   function openLightbox(url, caption) {
     if (!lightbox || !lightboxImg) return;
@@ -28,7 +28,52 @@
     document.body.classList.remove("no-scroll");
   }
 
-  function renderCluster(cluster) {
+  function sharedFromKey(key) {
+    if (!key || key.indexOf("shared=") < 0) return null;
+    return key.split("shared=").pop();
+  }
+
+  function setKindBanner(data) {
+    if (!kindBanner) return;
+    if (!data.clusters || !data.clusters.length) {
+      kindBanner.hidden = true;
+      kindBanner.textContent = "";
+      return;
+    }
+    // One page-level line (not repeated per set).
+    if (data.exact_n > 0 && data.near_n > 0) {
+      kindBanner.textContent =
+        "EXACT + NEAR · " +
+        data.exact_n +
+        " exact set(s), " +
+        data.near_n +
+        " near set(s) · near = ≥8/12 handicap cards shared";
+      kindBanner.className = "similar-kind-banner is-mixed";
+    } else if (data.exact_n > 0) {
+      kindBanner.textContent =
+        "EXACT · " + data.exact_n + " twin set(s) with identical fingerprints";
+      kindBanner.className = "similar-kind-banner is-exact";
+    } else {
+      kindBanner.textContent =
+        "NEAR handicap · no exact twins · closest pairs with ≥8/12 cards shared";
+      kindBanner.className = "similar-kind-banner is-near";
+    }
+    kindBanner.hidden = false;
+  }
+
+  function clusterDetail(cluster) {
+    const bits = [];
+    if (cluster.match_pct != null) bits.push(Math.round(cluster.match_pct) + "% match");
+    bits.push((cluster.size || cluster.games.length) + " games");
+    const shared = sharedFromKey(cluster.key);
+    if (shared) bits.push(shared + "/12 cards shared");
+    else if (cluster.exact) bits.push("12/12 exact");
+    if (cluster.stage) bits.push(cluster.stage);
+    return bits.join(" · ");
+  }
+
+  function renderCluster(cluster, index) {
+    const setNum = index + 1;
     const exactCls = cluster.exact ? " exact" : " near";
     const winnerBits = (cluster.winner_counts || [])
       .map(function (w) {
@@ -48,20 +93,26 @@
     gamesHtml += "</div>";
 
     const ids = cluster.game_ids || [];
-    const hostId = "shots-" + ids.join("-");
+    const hostId = "shots-set-" + setNum + "-" + ids.join("-");
 
     return (
       '<article class="similar-cluster panel' +
       exactCls +
-      '"><h3 class="cluster-head">' +
-      cluster.headline +
-      '</h3><p class="cluster-winners">Winners: ' +
+      '" data-set="' +
+      setNum +
+      '"><h3 class="cluster-set">Set ' +
+      setNum +
+      '</h3><p class="cluster-detail">' +
+      clusterDetail(cluster) +
+      '</p><p class="cluster-winners">Winners: ' +
       (winnerBits || "—") +
       sameNote +
       "</p>" +
       gamesHtml +
       '<div class="similar-actions"><button type="button" class="btn btn-sm" data-show-shots="' +
       hostId +
+      '" data-game-ids="' +
+      ids.join(",") +
       '">Show screenshots</button></div>' +
       '<div class="similar-shots" id="' +
       hostId +
@@ -92,7 +143,7 @@
       thumbs
         .map(function (t) {
           if (!t.url) {
-            return '<div class="shot-missing">#' + t.id + '<br>no screenshot</div>';
+            return '<div class="shot-missing">#' + t.id + "<br>no screenshot</div>";
           }
           return (
             '<button type="button" class="shot-thumb" data-shot-url="' +
@@ -109,7 +160,7 @@
           );
         })
         .join("") +
-      "</div><p class=muted>Tap a screenshot for full view.</p>";
+      '</div><p class="muted">Tap a screenshot for full view.</p>';
     host.querySelectorAll("[data-shot-url]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         openLightbox(btn.getAttribute("data-shot-url"), btn.getAttribute("data-shot-cap"));
@@ -122,12 +173,9 @@
       btn.addEventListener("click", async function () {
         const hostId = btn.getAttribute("data-show-shots");
         const host = document.getElementById(hostId);
-        const cluster = btn.closest(".similar-cluster");
-        const ids = [];
-        cluster.querySelectorAll(".game-card-block .game-card-head").forEach(function (el) {
-          const m = el.textContent.match(/#(\d+)/);
-          if (m) ids.push(m[1]);
-        });
+        const ids = (btn.getAttribute("data-game-ids") || "")
+          .split(",")
+          .filter(Boolean);
         btn.disabled = true;
         btn.textContent = "Screenshots loaded";
         await loadShots(host, ids);
@@ -139,6 +187,7 @@
     loading.hidden = false;
     empty.hidden = true;
     list.innerHTML = "";
+    if (kindBanner) kindBanner.hidden = true;
     summary.textContent = "Loading…";
     try {
       const exact = exactOnly && exactOnly.checked;
@@ -149,14 +198,14 @@
         data.corpus_n +
         " finished · " +
         data.cluster_count +
-        " clusters · " +
+        " sets · " +
         data.exact_n +
         " exact · " +
         data.near_n +
         " near · " +
         data.games_shown +
-        " games shown";
-      live.stamp(true, data.cluster_count + " clusters");
+        " games";
+      live.stamp(true, data.cluster_count + " sets");
       if (!data.clusters || !data.clusters.length) {
         empty.hidden = false;
         empty.textContent =
@@ -167,7 +216,12 @@
           " yet.";
         return;
       }
-      list.innerHTML = data.clusters.map(renderCluster).join("");
+      setKindBanner(data);
+      list.innerHTML = data.clusters
+        .map(function (cluster, i) {
+          return renderCluster(cluster, i);
+        })
+        .join("");
       bindList();
     } catch (_err) {
       loading.hidden = true;
@@ -177,14 +231,14 @@
   }
 
   refresh();
-  if (refreshBtn) refreshBtn.addEventListener("click", function () {
-    lastSig = "";
-    refresh();
-  });
-  if (exactOnly) exactOnly.addEventListener("change", function () {
-    lastSig = "";
-    refresh();
-  });
+  if (refreshBtn)
+    refreshBtn.addEventListener("click", function () {
+      refresh();
+    });
+  if (exactOnly)
+    exactOnly.addEventListener("change", function () {
+      refresh();
+    });
   if (lightbox) {
     lightbox.querySelector(".lightbox-close").addEventListener("click", closeLightbox);
     lightbox.addEventListener("click", function (e) {

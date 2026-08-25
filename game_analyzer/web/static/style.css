@@ -112,19 +112,32 @@ a { color: var(--accent); }
 
 /* Stats */
 .stats-bar { margin-bottom: 10px; }
-.stat-line {
-  margin: 0 0 4px;
-  font-size: 0.88rem;
+.stats-one-line {
+  margin: 0;
+  font-size: 0.82rem;
   color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: baseline;
+  line-height: 1.35;
 }
+.stats-sep { opacity: 0.5; }
 .stat-conf { color: var(--accent); }
 
 .confidence-strip {
   font-weight: 600;
   font-size: 0.95rem;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+.confidence-strip.is-strong {
+  color: #7ee787;
+  background: #1a3d2a;
+  border-color: #2d5a3a;
 }
 
-/* Idle hero */
+/* Idle hero — must respect [hidden] (display:flex otherwise wins) */
 .idle-hero {
   text-align: center;
   padding: 48px 20px;
@@ -133,6 +146,10 @@ a { color: var(--accent); }
   flex-direction: column;
   align-items: center;
   justify-content: center;
+}
+.idle-hero[hidden],
+.live-grid[hidden] {
+  display: none !important;
 }
 
 .idle-hero h2 {
@@ -401,16 +418,35 @@ a { color: var(--accent); }
   color: var(--muted);
 }
 
+.similar-kind-banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 0.92rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+.similar-kind-banner[hidden] { display: none !important; }
+.similar-kind-banner.is-near { color: var(--warn); }
+.similar-kind-banner.is-exact { color: var(--success); }
+.similar-kind-banner.is-mixed { color: var(--accent); }
+
 .similar-list { display: grid; gap: 12px; }
 
-.similar-cluster.exact .cluster-head { color: var(--success); }
-.similar-cluster.near .cluster-head { color: var(--warn); }
+.similar-cluster.exact .cluster-set { color: var(--success); }
+.similar-cluster.near .cluster-set { color: var(--warn); }
 
-.cluster-head {
-  margin: 0 0 6px;
-  font-size: 0.95rem;
+.cluster-set {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
 }
-
+.cluster-detail {
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-family: ui-monospace, Consolas, monospace;
+}
 .cluster-winners {
   margin: 0 0 10px;
   font-family: ui-monospace, Consolas, monospace;
@@ -614,6 +650,8 @@ a { color: var(--accent); }
 /* Responsive */
 @media (min-width: 640px) {
   .nav-link { flex: 0 1 auto; min-width: 88px; padding: 10px 16px; }
+  .site-nav { flex-wrap: nowrap; }
+  .nav-link { flex: 1 1 0; }
   .similar-games-row { grid-template-columns: 1fr 1fr; }
   .suit-name { width: 6.5rem; }
   .suit-row { flex-wrap: nowrap; align-items: center; }

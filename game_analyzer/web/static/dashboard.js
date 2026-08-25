@@ -5,14 +5,33 @@
 
   const idle = document.querySelector("[data-idle-hero]");
   const grid = document.querySelector("[data-live-grid]");
+  const strip = document.querySelector("[data-confidence-strip]");
   let lastSig = "";
 
   function setStats(stats) {
     if (!stats) return;
     const g = document.querySelector("[data-guess-stats]");
     const c = document.querySelector("[data-confidence-stats]");
-    if (g) g.textContent = stats.guess.text;
-    if (c) c.textContent = "Confidence accuracy  ·  " + stats.confidence_text;
+    if (g) {
+      const guess = stats.guess || {};
+      g.textContent =
+        guess.total > 0
+          ? "Acc " + guess.correct + "/" + guess.total + " (" + Math.round(guess.percent) + "%)"
+          : "Acc —";
+    }
+    if (c) {
+      // Compact: keep R2/R3 HIGH+VERY_HIGH only, shorter labels.
+      const raw = stats.confidence_text || "";
+      c.textContent = raw
+        .replace(/Confidence accuracy\s*·\s*/i, "")
+        .replace(/VERY_HIGH/g, "VH")
+        .replace(/HIGH/g, "H");
+    }
+  }
+
+  function titleCase(value) {
+    if (!value) return "";
+    return String(value).charAt(0).toUpperCase() + String(value).slice(1).toLowerCase();
   }
 
   function compactConfidence(conf, guess) {
@@ -22,24 +41,39 @@
       parts.push(conf.pct != null ? conf.level + " " + conf.pct + "%" : conf.level);
     }
     const pick = conf.pick || guess;
-    if (pick) parts.push(String(pick).charAt(0).toUpperCase() + String(pick).slice(1).toLowerCase());
+    if (pick) parts.push(titleCase(pick));
+    if (conf.track_gap != null) parts.push("gap +" + conf.track_gap);
+    if (conf.mc_pick != null) parts.push("MC " + Math.round(Number(conf.mc_pick) * 100) + "%");
     return parts.length ? parts.join(" · ") : "—";
   }
 
+  function showLive(on) {
+    if (idle) {
+      idle.hidden = on;
+      idle.style.display = on ? "none" : "";
+    }
+    if (grid) {
+      grid.hidden = !on;
+      grid.style.display = on ? "" : "none";
+    }
+  }
+
   function apply(data) {
-    const ready = data && data.ready;
-    idle.hidden = !!ready;
-    grid.hidden = !ready;
+    const ready = !!(data && data.ready && data.game_id);
+    showLive(ready);
+    setStats(data && data.stats);
     if (!ready) {
-      setStats(data && data.stats);
+      if (strip) strip.textContent = "—";
       return;
     }
 
-    setStats(data.stats);
-    document.querySelector("[data-confidence-strip]").textContent = compactConfidence(
-      data.confidence,
-      data.guess
-    );
+    if (strip) {
+      strip.textContent = compactConfidence(data.confidence, data.guess);
+      strip.classList.toggle(
+        "is-strong",
+        !!(data.confidence && (data.confidence.level === "HIGH" || data.confidence.level === "VERY_HIGH"))
+      );
+    }
     document.querySelector("[data-race-state]").textContent = data.in_progress
       ? "In progress / no winner yet"
       : "Race finished (winner highlighted)";
@@ -69,6 +103,9 @@
     document.querySelector("[data-card-table]").innerHTML = cards.suitTable(data.table);
   }
 
+  // Start idle until first successful live payload.
+  showLive(false);
+
   live.start(async function () {
     try {
       const data = await live.get("/api/live");
@@ -78,6 +115,8 @@
         frames: data.frames && data.frames.length,
         table: data.table,
         ready: data.ready,
+        conf: data.confidence,
+        guess: data.guess_text,
       });
       live.stamp(true, data.ready ? "game " + data.game_id : "waiting");
       if (sig === lastSig) return;

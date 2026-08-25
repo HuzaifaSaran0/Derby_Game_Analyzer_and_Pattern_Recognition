@@ -4,7 +4,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -27,7 +27,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "9"
+STATIC_VER = "12"
 
 
 def _neighbors(game_ids: list[str], game_id: str) -> tuple[str | None, str | None]:
@@ -143,6 +143,9 @@ def _confidence_for_game(game) -> dict:
         "level": conf.level.value if conf.ready else None,
         "pct": conf.confidence_pct,
         "pick": conf.pick,
+        "track_gap": conf.track_gap,
+        "mc_pick": conf.mc_pick,
+        "rivals_weak": conf.rivals_weak_count,
     }
 
 
@@ -173,7 +176,7 @@ def _guess_text(game) -> str:
     return f"{guess}  ✗ wrong (winner: {winner})"
 
 
-def _game_payload(store: GameStore, game_id: str) -> dict | None:
+def _game_payload(store: GameStore, game_id: str, *, include_frames: bool = True) -> dict | None:
     game = store.get_game(game_id)
     if game is None:
         return None
@@ -182,6 +185,15 @@ def _game_payload(store: GameStore, game_id: str) -> dict | None:
     latest_id = ids[-1] if ids else None
     snap2, snap3 = store.confidence_snapshots_for(game_id, simulations=400)
     latest_frame = game.frames[-1] if game.frames else None
+    frames = [
+        {
+            "seq": frame.seq,
+            "phase": frame.phase,
+            "captured_at": frame.captured_at,
+            "url": f"/shot/{game.game_id}/{frame.seq}?t={frame.captured_at}",
+        }
+        for frame in game.frames
+    ]
     return {
         "game_id": game.game_id,
         "winner": _winner_label(game.winner_suit),
@@ -201,18 +213,11 @@ def _game_payload(store: GameStore, game_id: str) -> dict | None:
             f" · locked guess uses {len(game.guess_draw_cards)}"
             f" ({len(game.guess_draw_cards) // 3} rounds)"
         ),
-        "frames": [
-            {
-                "seq": frame.seq,
-                "phase": frame.phase,
-                "captured_at": frame.captured_at,
-                "url": f"/shot/{game.game_id}/{frame.seq}?t={frame.captured_at}",
-            }
-            for frame in game.frames
-        ],
+        "shot_count": len(frames),
+        "frames": frames if include_frames else [],
         "preview_url": (
             f"/shot/{game.game_id}/{latest_frame.seq}?t={latest_frame.captured_at}"
-            if latest_frame
+            if latest_frame and include_frames
             else None
         ),
         "prev_id": prev_id,
@@ -257,6 +262,7 @@ def _similar_payload(store: GameStore, *, exact_only: bool = False) -> dict:
         "clusters": [
             {
                 "headline": format_cluster_headline(c),
+                "key": c.key,
                 "exact": c.exact,
                 "stage": c.stage.value,
                 "match_pct": c.match_pct,
@@ -299,14 +305,10 @@ def create_app(store: GameStore | None = None) -> FastAPI:
             context=_ctx(request, active="live"),
         )
 
-    @app.get("/games", response_class=HTMLResponse)
-    def games_page(request: Request):
-        games = store.list_games()
-        return templates.TemplateResponse(
-            request=request,
-            name="index.html",
-            context=_ctx(request, games=games, active="games"),
-        )
+    @app.get("/games")
+    def games_page():
+        # All-games list removed — History covers browsing saved games.
+        return RedirectResponse(url="/history", status_code=302)
 
     @app.get("/history", response_class=HTMLResponse)
     def history_page(request: Request):
@@ -353,11 +355,26 @@ def create_app(store: GameStore | None = None) -> FastAPI:
 
     @app.get("/api/history/{game_id}")
     def api_history(game_id: str):
-        payload = _game_payload(store, game_id)
+        # Skip frame URLs so Prev/Next stays fast; shots load on demand.
+        payload = _game_payload(store, game_id, include_frames=False)
         if payload is None:
             raise HTTPException(status_code=404, detail="Game not found")
         payload["stats"] = _stats_payload(store)
         return JSONResponse(payload, headers=NO_CACHE)
+
+    @app.get("/api/history/{game_id}/shots")
+    def api_history_shots(game_id: str):
+        payload = _game_payload(store, game_id, include_frames=True)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Game not found")
+        return JSONResponse(
+            {
+                "game_id": payload["game_id"],
+                "shot_count": payload["shot_count"],
+                "frames": payload["frames"],
+            },
+            headers=NO_CACHE,
+        )
 
     @app.get("/game/{game_id}/live")
     def game_live(game_id: str):

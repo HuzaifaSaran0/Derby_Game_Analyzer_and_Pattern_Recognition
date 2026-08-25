@@ -4,8 +4,11 @@
 {% block body_attrs %}data-start-id="{{ start_id or '' }}"{% endblock %}
 {% block content %}
 <section class="stats-bar">
-  <p class="stat-line" data-guess-stats>Accuracy  —  loading…</p>
-  <p class="stat-line stat-conf" data-confidence-stats>Confidence accuracy  ·  loading…</p>
+  <p class="stats-one-line">
+    <span data-guess-stats>Acc —</span>
+    <span class="stats-sep">·</span>
+    <span class="stat-conf" data-confidence-stats>loading…</span>
+  </p>
 </section>
 
 <nav class="pager">
@@ -31,6 +34,7 @@
   <section class="panel shots-panel">
     <h2 class="panel-title">Screenshots</h2>
     <p class="empty" data-shots-empty hidden>No screenshots for this game yet.</p>
+    <button type="button" class="btn btn-sm" data-show-shots hidden>See screenshots</button>
     <div class="shot-grid" data-shot-grid></div>
   </section>
 </div>
