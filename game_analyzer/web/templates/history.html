@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Game Analyzer — History{% endblock %}
+{% block page %}history{% endblock %}
+{% block body_attrs %}data-start-id="{{ start_id or '' }}"{% endblock %}
+{% block content %}
+<section class="stats-bar">
+  <p class="stat-line" data-guess-stats>Accuracy  —  loading…</p>
+  <p class="stat-line stat-conf" data-confidence-stats>Confidence accuracy  ·  loading…</p>
+</section>
+
+<nav class="pager">
+  <button type="button" class="btn" data-nav="prev">Previous</button>
+  <button type="button" class="btn btn-latest" data-nav="latest">Latest</button>
+  <button type="button" class="btn" data-nav="next">Next</button>
+</nav>
+
+<section class="panel history-head">
+  <p class="history-pos" data-game-pos>—</p>
+  <p class="winner-line">Winner: <strong data-winner>—</strong></p>
+  <p class="guess-line">Guess: <span data-guess>—</span></p>
+  <p class="conf-line" data-conf-r2>R2 confidence: —</p>
+  <p class="conf-line" data-conf-r3>R3 confidence: —</p>
+  <p class="meta" data-game-meta></p>
+</section>
+
+<div class="history-grid">
+  <section class="panel">
+    <h2 class="panel-title">Card table</h2>
+    <div data-card-table></div>
+  </section>
+  <section class="panel shots-panel">
+    <h2 class="panel-title">Screenshots</h2>
+    <p class="empty" data-shots-empty hidden>No screenshots for this game yet.</p>
+    <div class="shot-grid" data-shot-grid></div>
+  </section>
+</div>
+
+<div id="lightbox" class="lightbox" hidden>
+  <button type="button" class="lightbox-close" aria-label="Close">×</button>
+  <button type="button" class="lightbox-nav lightbox-prev" aria-label="Previous">‹</button>
+  <img alt="" />
+  <button type="button" class="lightbox-nav lightbox-next" aria-label="Next">›</button>
+  <p class="lightbox-status"></p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/history-page.js?v={{ static_ver }}"></script>
+{% endblock %}

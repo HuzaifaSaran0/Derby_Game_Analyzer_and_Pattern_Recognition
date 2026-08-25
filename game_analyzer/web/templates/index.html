@@ -1,39 +1,28 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#111114" />
-  <title>Game Analyzer</title>
-  <link rel="stylesheet" href="/static/style.css?v=6" />
-</head>
-<body data-page="home">
-  <header class="top">
-    <h1>Game Analyzer</h1>
-    <p class="sub live-note" data-live-status>Watching laptop capture</p>
-  </header>
-
-  <p class="empty" data-empty-games {% if games %}hidden{% endif %}>No games stored yet. Run desktop capture on the laptop — this list updates by itself.</p>
-  {% if games %}
-  <a class="btn btn-latest jump-latest" href="/game/{{ games[0].game_id }}">Go to latest game</a>
-  {% endif %}
-  <ul class="game-list" data-game-list>
-    {% for g in games %}
-    <li>
-      <a class="game-card" href="/game/{{ g.game_id }}">
-        <div class="game-id">{{ g.game_id }}</div>
-        <div class="game-meta">
-          <span class="winner {% if g.winner_suit %}has{% endif %}">
-            {% if g.winner_suit %}{{ g.winner_suit|title }} wins{% else %}In play{% endif %}
-          </span>
-          <span>{{ g.shot_count }} shot{{ 's' if g.shot_count != 1 else '' }}</span>
-        </div>
-        <div class="when">{{ g.started_at }}</div>
-      </a>
-    </li>
-    {% endfor %}
-  </ul>
-  <script src="/static/live.js?v=6"></script>
-  <script src="/static/home.js?v=6"></script>
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}Game Analyzer — All games{% endblock %}
+{% block page %}games{% endblock %}
+{% block content %}
+<p class="empty" data-empty-games {% if games %}hidden{% endif %}>No games stored yet. Run desktop capture on the laptop — this list updates by itself.</p>
+{% if games %}
+<a class="btn btn-latest jump-latest" href="/game/{{ games[0].game_id }}">Go to latest game</a>
+{% endif %}
+<ul class="game-list" data-game-list>
+  {% for g in games %}
+  <li>
+    <a class="game-card" href="/game/{{ g.game_id }}">
+      <div class="game-id">{{ g.game_id }}</div>
+      <div class="game-meta">
+        <span class="winner {% if g.winner_suit %}has{% endif %}">
+          {% if g.winner_suit %}{{ g.winner_suit|title }} wins{% else %}In play{% endif %}
+        </span>
+        <span>{{ g.shot_count }} shot{{ 's' if g.shot_count != 1 else '' }}</span>
+      </div>
+      <div class="when">{{ g.started_at }}</div>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}
+{% block scripts %}
+<script src="/static/home.js?v={{ static_ver }}"></script>
+{% endblock %}

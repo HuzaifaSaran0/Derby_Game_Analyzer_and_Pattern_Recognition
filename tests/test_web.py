@@ -71,16 +71,24 @@ def _client(tmp_path: Path) -> TestClient:
 
 def test_home_lists_games(tmp_path: Path):
     client = _client(tmp_path)
-    response = client.get("/")
+    response = client.get("/games")
     assert response.status_code == 200
     assert "100" in response.text
     assert "99" in response.text
     assert "Clubs wins" in response.text
 
 
+def test_live_page(tmp_path: Path):
+    client = _client(tmp_path)
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Win chance" in response.text
+    assert "/static/dashboard.js" in response.text
+
+
 def test_home_empty(tmp_path: Path):
     store = GameStore(tmp_path / "games.sqlite", root=tmp_path)
-    response = TestClient(create_app(store)).get("/")
+    response = TestClient(create_app(store)).get("/games")
     assert response.status_code == 200
     assert "No games stored yet" in response.text
 
@@ -89,7 +97,7 @@ def test_game_page_shows_table_and_shots(tmp_path: Path):
     client = _client(tmp_path)
     response = client.get("/game/100")
     assert response.status_code == 200
-    assert "Generated table" in response.text
+    assert "Card table" in response.text
     assert "Screenshots" in response.text
     assert "Winner:" in response.text
     assert "Clubs" in response.text
@@ -105,10 +113,26 @@ def test_game_page_shows_table_and_shots(tmp_path: Path):
 
 def test_home_includes_live_script(tmp_path: Path):
     client = _client(tmp_path)
-    response = client.get("/")
+    response = client.get("/games")
     assert "/static/home.js" in response.text
     assert "/static/live.js" in response.text
+    assert "/static/cards.js" in response.text
     assert "data-live-status" in response.text
+
+
+def test_similar_and_stats_api(tmp_path: Path):
+    client = _client(tmp_path)
+    stats = client.get("/api/stats").json()
+    assert "guess" in stats
+    assert "confidence_text" in stats
+    similar = client.get("/api/similar").json()
+    assert "corpus_n" in similar
+    assert "clusters" in similar
+    page = client.get("/similar")
+    assert page.status_code == 200
+    assert "Similar" in page.text
+    history = client.get("/history")
+    assert history.status_code == 200
 
 
 def test_api_games_and_game_payload(tmp_path: Path):
@@ -125,7 +149,12 @@ def test_api_games_and_game_payload(tmp_path: Path):
     assert payload["frames"][0]["seq"] == 1
     assert payload["frames"][0]["url"].startswith("/shot/100/1")
     assert payload["table"][0]["name"] == "Spades"
-    assert "KS" in payload["table"][0]["cards"]
+    assert payload["table"][0]["cards"][0]["code"] == "AS"
+    assert payload["table"][0]["cards"][0]["rank"] == "A"
+    assert payload["table"][0]["cards"][0]["symbol"] == "♠"
+    live = client.get("/api/live").json()
+    assert live.get("ready") is True
+    assert live["game_id"] == games[0]["game_id"]
 
 
 def test_api_picks_up_new_screenshot(tmp_path: Path):

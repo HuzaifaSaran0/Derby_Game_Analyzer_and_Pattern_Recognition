@@ -2,8 +2,15 @@
   const gameId = document.body.getAttribute("data-game-id");
   const carousel = document.querySelector("[data-carousel]");
   const emptyShots = document.querySelector("[data-shots-empty]");
-  const tableBox = document.querySelector("[data-table]");
-  if (!gameId || !carousel) return;
+  const tableBox = document.querySelector("[data-card-table]");
+  const cards = window.gameAnalyzerCards;
+  if (!gameId || !cards) return;
+
+  if (window.__INITIAL_GAME__ && tableBox) {
+    tableBox.innerHTML = cards.suitTable(window.__INITIAL_GAME__.table);
+  }
+
+  if (!carousel) return;
 
   const track = carousel.querySelector(".carousel-track");
   const prevBtn = carousel.querySelector(".carousel-prev");
@@ -73,7 +80,6 @@
     go(i);
     lightboxOpen = true;
     lightbox.hidden = false;
-    lightbox.classList.add("open");
     document.body.classList.add("no-scroll");
     syncLightbox();
   }
@@ -81,7 +87,6 @@
   function closeLightbox() {
     lightboxOpen = false;
     lightbox.hidden = true;
-    lightbox.classList.remove("open");
     document.body.classList.remove("no-scroll");
   }
 
@@ -93,47 +98,6 @@
       el.removeAttribute("href");
       el.classList.add("disabled");
     }
-  }
-
-  function renderTable(rows) {
-    if (!rows || !rows.length) {
-      tableBox.innerHTML = '<p class="empty">No cards stored.</p>';
-      return;
-    }
-    tableBox.innerHTML =
-      '<div class="suit-table">' +
-      rows
-        .map(function (row) {
-          const cards = row.cards && row.cards.length
-            ? row.cards
-                .map(function (card) {
-                  const text = String(card);
-                  return (
-                    '<div class="mini-card" style="color: ' +
-                    row.color +
-                    '"><span class="rank">' +
-                    text.slice(0, -1) +
-                    '</span><span class="pip">' +
-                    row.symbol +
-                    "</span></div>"
-                  );
-                })
-                .join("")
-            : '<span class="dash">—</span>';
-          return (
-            '<div class="suit-row"><div class="suit-name" style="color: ' +
-            row.color +
-            '">' +
-            row.symbol +
-            " " +
-            row.name +
-            '</div><div class="mini-cards">' +
-            cards +
-            "</div></div>"
-          );
-        })
-        .join("") +
-      "</div>";
   }
 
   function makeSlide(frame, i) {
@@ -196,13 +160,22 @@
 
   function apply(data) {
     document.querySelector("[data-winner]").textContent = data.winner;
+    if (document.querySelector("[data-guess]")) {
+      document.querySelector("[data-guess]").textContent = data.guess_text;
+    }
     const meta = "Started " + data.started_at + (data.finished_at ? " · Finished " + data.finished_at : "");
-    document.querySelector("[data-game-meta]").textContent = meta;
-    document.querySelector("[data-game-pos]").textContent = data.index + " / " + data.total;
+    const metaEl = document.querySelector("[data-game-meta]");
+    if (metaEl) metaEl.textContent = meta;
+    const posEl = document.querySelector("[data-game-pos]");
+    if (posEl) posEl.textContent = data.index + " / " + data.total;
     setNav(document.querySelector('[data-nav="prev"]'), data.prev_id);
     setNav(document.querySelector('[data-nav="next"]'), data.next_id);
     setNavLatest(document.querySelector('[data-nav="latest"]'), data.latest_id);
-    renderTable(data.table);
+    if (tableBox) tableBox.innerHTML = cards.suitTable(data.table);
+    const wc = document.querySelector("[data-win-chance]");
+    if (wc && data.win_chance) {
+      wc.innerHTML = cards.winChance(data.win_chance, data.win_chance_note);
+    }
     applyFrames(data.frames || []);
   }
 
@@ -283,6 +256,7 @@
         total: data.total,
         prev_id: data.prev_id,
         next_id: data.next_id,
+        guess_text: data.guess_text,
       });
       live.stamp(true, (data.frames || []).length + " shot" + ((data.frames || []).length === 1 ? "" : "s"));
       if (sig === lastSig) return;

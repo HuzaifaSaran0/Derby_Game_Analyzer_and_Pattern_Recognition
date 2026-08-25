@@ -1,90 +1,76 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#111114" />
-  <title>Game {{ game.game_id }}</title>
-  <link rel="stylesheet" href="/static/style.css?v=6" />
-</head>
-<body data-page="game" data-game-id="{{ game.game_id }}">
-  <header class="top">
-    <a class="back" href="/">All games</a>
-    <h1>Game {{ game.game_id }}</h1>
-    <p class="sub"><span data-game-pos>{{ index }} / {{ total }}</span> · <span class="live-note" data-live-status>Live</span></p>
-  </header>
+{% extends "base.html" %}
+{% block title %}Game {{ game.game_id }}{% endblock %}
+{% block page %}game{% endblock %}
+{% block body_attrs %}data-game-id="{{ game.game_id }}"{% endblock %}
+{% block content %}
+<nav class="pager">
+  <a class="btn{% if not game.prev_id %} disabled{% endif %}" data-nav="prev" {% if game.prev_id %}href="/game/{{ game.prev_id }}"{% endif %}>Previous</a>
+  <a class="btn btn-latest{% if game.latest_id == game.game_id %} disabled{% endif %}" data-nav="latest" {% if game.latest_id and game.latest_id != game.game_id %}href="/game/{{ game.latest_id }}"{% endif %}>Latest</a>
+  <a class="btn{% if not game.next_id %} disabled{% endif %}" data-nav="next" {% if game.next_id %}href="/game/{{ game.next_id }}"{% endif %}>Next</a>
+</nav>
 
-  <nav class="pager">
-    <a class="btn{% if not prev_id %} disabled{% endif %}" data-nav="prev" {% if prev_id %}href="/game/{{ prev_id }}"{% endif %}>Previous</a>
-    <a class="btn btn-latest{% if latest_id == game.game_id %} disabled{% endif %}" data-nav="latest" {% if latest_id and latest_id != game.game_id %}href="/game/{{ latest_id }}"{% endif %}>Latest</a>
-    <a class="btn{% if not next_id %} disabled{% endif %}" data-nav="next" {% if next_id %}href="/game/{{ next_id }}"{% endif %}>Next</a>
-  </nav>
+<section class="panel history-head">
+  <p class="history-pos">{{ game.index }} / {{ game.total }}</p>
+  <p class="winner-line">Winner: <strong data-winner>{{ game.winner }}</strong></p>
+  <p class="guess-line">Guess: <span data-guess>{{ game.guess_text }}</span></p>
+  <p class="conf-line" data-conf-r2>{{ game.confidence_r2 }}</p>
+  <p class="conf-line" data-conf-r3>{{ game.confidence_r3 }}</p>
+  <p class="meta" data-game-meta>Started {{ game.started_at }}{% if game.finished_at %} · Finished {{ game.finished_at }}{% endif %}</p>
+</section>
 
-  <section class="fetched">
-    <div class="winner-line">Winner: <strong data-winner>{{ winner }}</strong></div>
-    <div class="meta" data-game-meta>Started {{ game.started_at }}{% if game.finished_at %} · Finished {{ game.finished_at }}{% endif %}</div>
-  </section>
-
-  <div class="layout">
-    <section class="shots">
-      <h2>Screenshots</h2>
-      <p class="empty" data-shots-empty {% if game.frames %}hidden{% endif %}>No screenshots for this game yet.</p>
-      <div class="carousel" data-carousel {% if not game.frames %}hidden{% endif %}>
-        <div class="carousel-viewport">
-          <div class="carousel-track">
-            {% for frame in game.frames %}
-            <figure class="shot" data-seq="{{ frame.seq }}" data-caption="#{{ frame.seq }} · {{ frame.phase }} · {{ frame.captured_at }}">
-              <button type="button" class="shot-open" data-index="{{ loop.index0 }}" aria-label="Open screenshot {{ frame.seq }}">
-                <img src="/shot/{{ game.game_id }}/{{ frame.seq }}?t={{ frame.captured_at }}" alt="Round {{ frame.seq }} {{ frame.phase }}" loading="lazy" />
-              </button>
-            </figure>
-            {% endfor %}
-          </div>
-        </div>
-        <button type="button" class="carousel-nav carousel-prev" aria-label="Previous screenshot" {% if game.frames|length < 2 %}hidden{% endif %}>‹</button>
-        <button type="button" class="carousel-nav carousel-next" aria-label="Next screenshot" {% if game.frames|length < 2 %}hidden{% endif %}>›</button>
-        <div class="carousel-dots" role="tablist" aria-label="Screenshot slides"></div>
-        <p class="carousel-status"></p>
-      </div>
-    </section>
-
-    <section class="table-panel">
-      <h2>Generated table</h2>
-      <div data-table>
-        {% if not table %}
-        <p class="empty">No cards stored.</p>
-        {% else %}
-        <div class="suit-table">
-          {% for row in table %}
-          <div class="suit-row">
-            <div class="suit-name" style="color: {{ row.color }}">{{ row.symbol }} {{ row.name }}</div>
-            <div class="mini-cards">
-              {% if not row.cards %}
-              <span class="dash">—</span>
-              {% endif %}
-              {% for card in row.cards %}
-              <div class="mini-card" style="color: {{ row.color }}">
-                <span class="rank">{{ card[:-1] }}</span>
-                <span class="pip">{{ row.symbol }}</span>
-              </div>
-              {% endfor %}
-            </div>
-          </div>
+<div class="game-layout">
+  <section class="panel shots-panel">
+    <h2 class="panel-title">Screenshots</h2>
+    <p class="empty" data-shots-empty {% if game.frames %}hidden{% endif %}>No screenshots for this game yet.</p>
+    <div class="carousel" data-carousel {% if not game.frames %}hidden{% endif %}>
+      <div class="carousel-viewport">
+        <div class="carousel-track">
+          {% for frame in game.frames %}
+          <figure class="shot" data-seq="{{ frame.seq }}" data-caption="#{{ frame.seq }} · {{ frame.phase }} · {{ frame.captured_at }}">
+            <button type="button" class="shot-open" data-index="{{ loop.index0 }}" aria-label="Open screenshot {{ frame.seq }}">
+              <img src="{{ frame.url }}" alt="Round {{ frame.seq }} {{ frame.phase }}" loading="lazy" />
+            </button>
+          </figure>
           {% endfor %}
         </div>
-        {% endif %}
       </div>
-    </section>
-  </div>
+      <button type="button" class="carousel-nav carousel-prev" aria-label="Previous screenshot" {% if game.frames|length < 2 %}hidden{% endif %}>‹</button>
+      <button type="button" class="carousel-nav carousel-next" aria-label="Next screenshot" {% if game.frames|length < 2 %}hidden{% endif %}>›</button>
+      <div class="carousel-dots" role="tablist" aria-label="Screenshot slides"></div>
+      <p class="carousel-status"></p>
+    </div>
+  </section>
 
-  <div id="lightbox" class="lightbox" hidden>
-    <button type="button" class="lightbox-close" aria-label="Close">×</button>
-    <button type="button" class="lightbox-nav lightbox-prev" aria-label="Previous screenshot">‹</button>
-    <img alt="" />
-    <button type="button" class="lightbox-nav lightbox-next" aria-label="Next screenshot">›</button>
-    <p class="lightbox-status"></p>
-  </div>
-  <script src="/static/live.js?v=6"></script>
-  <script src="/static/game.js?v=6"></script>
-</body>
-</html>
+  <section class="panel">
+    <h2 class="panel-title">Win chance</h2>
+    <div data-win-chance>
+      {% for row in game.win_chance %}
+      <div class="win-row{% if row.highlight %} highlight{% elif row.preview %} preview{% endif %}">
+        <span class="win-suit" style="color: {{ row.color }}">{{ row.symbol }} {{ row.suit }}</span>
+        <span class="win-text">{{ row.text }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="win-note">{{ game.win_chance_note }}</p>
+  </section>
+
+  <section class="panel table-panel">
+    <h2 class="panel-title">Card table</h2>
+    <div data-card-table></div>
+  </section>
+</div>
+
+<div id="lightbox" class="lightbox" hidden>
+  <button type="button" class="lightbox-close" aria-label="Close">×</button>
+  <button type="button" class="lightbox-nav lightbox-prev" aria-label="Previous screenshot">‹</button>
+  <img alt="" />
+  <button type="button" class="lightbox-nav lightbox-next" aria-label="Next screenshot">›</button>
+  <p class="lightbox-status"></p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.__INITIAL_GAME__ = {{ game | tojson | safe }};
+</script>
+<script src="/static/game.js?v={{ static_ver }}"></script>
+{% endblock %}

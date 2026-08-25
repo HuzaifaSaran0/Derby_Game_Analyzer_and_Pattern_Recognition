@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Game Analyzer — Live{% endblock %}
+{% block page %}live{% endblock %}
+{% block content %}
+<section class="stats-bar">
+  <p class="stat-line" data-guess-stats>Accuracy  —  loading…</p>
+  <p class="stat-line stat-conf" data-confidence-stats>Confidence accuracy  ·  loading…</p>
+</section>
+
+  <section class="panel confidence-strip" data-confidence-strip>
+  —
+</section>
+
+<section class="panel idle-hero" data-idle-hero hidden>
+  <h2>Game Analyzer</h2>
+  <p class="idle-cta">Press <strong>Start capture</strong> on the desktop app to begin.</p>
+  <p class="idle-note">This page updates live from the laptop — preview, win chance, and card table appear after the first capture.</p>
+</section>
+
+<div class="live-grid" data-live-grid hidden>
+  <section class="panel preview-panel">
+    <h2 class="panel-title">Preview</h2>
+    <div class="preview-box" data-preview>
+      <span class="muted">Waiting for capture…</span>
+    </div>
+    <p class="session-line" data-session>—</p>
+  </section>
+
+  <section class="panel session-panel">
+    <h2 class="panel-title">Session data</h2>
+    <dl class="kv-list">
+      <div><dt>Race state</dt><dd data-race-state>—</dd></div>
+      <div><dt>Locked guess</dt><dd data-locked-guess>—</dd></div>
+      <div><dt>Confidence</dt><dd data-confidence>—</dd></div>
+      <div><dt>Winner (OCR)</dt><dd data-winner>—</dd></div>
+      <div><dt>Game phase</dt><dd data-phase>—</dd></div>
+      <div><dt>Game ID</dt><dd data-game-id>—</dd></div>
+    </dl>
+  </section>
+
+  <section class="panel win-panel">
+    <h2 class="panel-title">Win chance</h2>
+    <p class="panel-sub">Expected finish + track blend</p>
+    <div data-win-chance></div>
+    <p class="win-note" data-win-note></p>
+  </section>
+
+  <section class="panel table-panel">
+    <h2 class="panel-title">Card table</h2>
+    <div data-card-table></div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/dashboard.js?v={{ static_ver }}"></script>
+{% endblock %}

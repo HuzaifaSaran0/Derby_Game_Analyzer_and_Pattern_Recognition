@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1117" />
+  <title>{% block title %}Game Analyzer{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ static_ver }}" />
+  {% block head %}{% endblock %}
+</head>
+<body data-page="{% block page %}{% endblock %}" {% block body_attrs %}{% endblock %}>
+  <header class="site-header">
+    <div class="site-brand">
+      <h1><a href="/">Game Analyzer</a></h1>
+      <p class="sub live-note" data-live-status>Watching laptop capture</p>
+    </div>
+    <nav class="site-nav" aria-label="Main">
+      <a class="nav-link{% if active == 'live' %} on{% endif %}" href="/">Live</a>
+      <a class="nav-link{% if active == 'history' %} on{% endif %}" href="/history">History</a>
+      <a class="nav-link{% if active == 'similar' %} on{% endif %}" href="/similar">Similar</a>
+      <a class="nav-link{% if active == 'games' %} on{% endif %}" href="/games">All games</a>
+    </nav>
+  </header>
+  <main class="site-main">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="/static/live.js?v={{ static_ver }}"></script>
+  <script src="/static/cards.js?v={{ static_ver }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

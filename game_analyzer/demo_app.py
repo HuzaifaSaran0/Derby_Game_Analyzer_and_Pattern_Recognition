@@ -112,7 +112,7 @@ class DemoApp(ctk.CTk):
 
         self.confidence_strip = ctk.CTkLabel(
             self.header,
-            text="Confidence: —",
+            text="  —",
             font=UI_FONT_TITLE,
             text_color=UI_MUTED,
             fg_color=UI_PANEL,
@@ -120,21 +120,9 @@ class DemoApp(ctk.CTk):
             anchor="w",
             justify="left",
             wraplength=860,
+            height=32,
         )
         self.confidence_strip.pack(fill="x", pady=(0, 4))
-
-        self.alert_banner = ctk.CTkLabel(
-            self.header,
-            text="",
-            font=UI_FONT_TITLE,
-            text_color="#0d1117",
-            fg_color=UI_SUCCESS,
-            corner_radius=8,
-            anchor="w",
-            justify="left",
-            wraplength=860,
-        )
-        self._alert_banner_visible = False
         self._twin_notified: set[str] = set()
         self._twin_toast_job = None
 
@@ -428,7 +416,6 @@ class DemoApp(ctk.CTk):
         wrap = max(360, event.width - 48)
         self.status.configure(wraplength=wrap)
         self.confidence_strip.configure(wraplength=wrap)
-        self.alert_banner.configure(wraplength=wrap)
         self.twin_toast.configure(wraplength=wrap)
         if not self._workspace_live:
             # Keep the idle hero filling most of the window.
@@ -503,10 +490,14 @@ class DemoApp(ctk.CTk):
         self,
         level: ConfidenceLevel,
         *,
+        alert_fired: bool,
+        alert_kind: str | None,
         would_alert: bool,
     ) -> tuple[str, str]:
-        if would_alert:
-            return UI_TEXT, "#2d3a1f"
+        if alert_fired and alert_kind == "cancel":
+            return UI_TEXT, "#8b3a3a"
+        if alert_fired or would_alert:
+            return "#0d1117", UI_SUCCESS
         styles = {
             ConfidenceLevel.NONE: (UI_MUTED, UI_PANEL),
             ConfidenceLevel.LOW: ("#ffb86c", "#2d2218"),
@@ -516,6 +507,22 @@ class DemoApp(ctk.CTk):
         }
         return styles.get(level, (UI_MUTED, UI_PANEL))
 
+    @staticmethod
+    def _compact_confidence_text(confidence: ConfidenceResult) -> str:
+        """One short line: MEDIUM 53% · Diamonds · gap +8 · MC 54%."""
+        if not confidence.ready:
+            return "need 2 rounds"
+        parts: list[str] = [confidence.level.value]
+        if confidence.confidence_pct is not None:
+            parts[0] = f"{confidence.level.value} {confidence.confidence_pct}%"
+        if confidence.pick:
+            parts.append(confidence.pick.title())
+        if confidence.track_gap is not None:
+            parts.append(f"gap +{confidence.track_gap}")
+        if confidence.mc_pick is not None:
+            parts.append(f"MC {confidence.mc_pick:.0%}")
+        return " · ".join(parts)
+
     def _update_confidence_strip(
         self,
         confidence: ConfidenceResult,
@@ -524,48 +531,31 @@ class DemoApp(ctk.CTk):
         alert_kind: str | None,
         alert_message: str | None,
     ) -> None:
-        summary = confidence_summary_for_ui(
-            confidence,
-            settings=self.alert_settings,
-            alert_fired=False,
-            alert_kind=None,
-        )
         would_alert = (
             self.alert_settings.enabled
             and confidence.ready
             and level_at_least(confidence.level, self.alert_settings.min_level)
             and not alert_fired
         )
-        if not confidence.ready:
-            text = "  Confidence  —  (need 2 draw rounds)"
+        core = self._compact_confidence_text(confidence)
+        if alert_fired and alert_kind:
+            label = alert_kind.upper()
+            text = f"  {label}  ·  {core}"
+        elif would_alert:
+            text = f"  BET?  ·  {core}"
+        elif not confidence.ready:
+            text = f"  —  ·  {core}"
         else:
-            text = f"  Confidence  ·  {summary}"
+            text = f"  {core}"
             if not self.alert_settings.enabled:
                 text += "  ·  alerts off"
-        fg, bg = self._confidence_strip_style(confidence.level, would_alert=would_alert)
+        fg, bg = self._confidence_strip_style(
+            confidence.level,
+            alert_fired=alert_fired,
+            alert_kind=alert_kind,
+            would_alert=would_alert,
+        )
         self.confidence_strip.configure(text=text, text_color=fg, fg_color=bg)
-
-    def _short_alert_text(self, message: str, kind: str | None) -> str:
-        cleaned = message
-        if kind:
-            cleaned = cleaned.replace(f"[{kind.upper()}]", "").strip(" —")
-        return cleaned
-
-    def _set_alert_banner(self, *, visible: bool, text: str = "", kind: str | None = None) -> None:
-        if visible and text:
-            short = self._short_alert_text(text, kind)
-            label = kind.upper() if kind else "ALERT"
-            self.alert_banner.configure(
-                text=f"  {label}  ·  {short}",
-                fg_color=UI_SUCCESS if kind != "cancel" else "#8b3a3a",
-                text_color="#0d1117" if kind != "cancel" else UI_TEXT,
-            )
-            if not self._alert_banner_visible:
-                self.alert_banner.pack(fill="x", pady=(0, 4))
-                self._alert_banner_visible = True
-        elif self._alert_banner_visible:
-            self.alert_banner.pack_forget()
-            self._alert_banner_visible = False
 
     def _set_results(
         self,
@@ -642,14 +632,10 @@ class DemoApp(ctk.CTk):
         else:
             self.result_confidence.configure(text="—")
             self.confidence_strip.configure(
-                text="Confidence  —  (waiting for cards)",
+                text="  —  ·  waiting for cards",
                 text_color=UI_MUTED,
                 fg_color=UI_PANEL,
             )
-        if alert_fired and alert_message:
-            self._set_alert_banner(visible=True, text=alert_message, kind=alert_kind)
-        else:
-            self._set_alert_banner(visible=False)
         self._maybe_twin_notify(
             handicap_cards=tuple(result.handicap_cards) if result.has_handicap_cards() else (),
             draw_cards=tuple(guess_draws) if guess_draws else (),
