@@ -181,3 +181,128 @@ def test_store_similarity_apis(tmp_path: Path):
     signal = store.live_twin_signal(HANDICAP_A, R1 + R2, confidence=None, exclude_game_id="99")
     assert signal is not None
     assert signal.suggested_winner == "Spades"
+
+
+def test_similarity_corpus_rebuilds_short_draws_json_from_frames(tmp_path: Path):
+    """Corpus must rebuild full draws from IN_PLAY frames when draws_json was overwritten short."""
+    store = GameStore(tmp_path / "games.sqlite")
+    now = datetime(2026, 1, 1, 12, 0, 0)
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(b"x")
+
+    store.record(
+        SessionDecision(
+            recording=True,
+            session_id="game_50",
+            seq=1,
+            phase=GamePhase.DEALT,
+            reason="test",
+            should_save=True,
+            game_id="50",
+            table_cards=(),
+        ),
+        ExtractionResult(
+            race_state=RaceState.BETTING,
+            winner_suit=None,
+            high_low=None,
+            confident=True,
+            handicap_cards=HANDICAP_A,
+            draw_cards=(),
+        ),
+        shot,
+        now,
+        root=tmp_path,
+    )
+    store.record(
+        SessionDecision(
+            recording=True,
+            session_id="game_50",
+            seq=2,
+            phase=GamePhase.IN_PLAY,
+            reason="test",
+            should_save=True,
+            game_id="50",
+            table_cards=(),
+            drawn_cards=R1,
+        ),
+        ExtractionResult(
+            race_state=RaceState.BETTING,
+            winner_suit=None,
+            high_low=None,
+            confident=True,
+            handicap_cards=HANDICAP_A,
+            draw_cards=R1,
+        ),
+        shot,
+        now,
+        root=tmp_path,
+    )
+    store.record(
+        SessionDecision(
+            recording=True,
+            session_id="game_50",
+            seq=3,
+            phase=GamePhase.IN_PLAY,
+            reason="test",
+            should_save=True,
+            game_id="50",
+            table_cards=(),
+            drawn_cards=R1 + R2,
+        ),
+        ExtractionResult(
+            race_state=RaceState.BETTING,
+            winner_suit=None,
+            high_low=None,
+            confident=True,
+            handicap_cards=HANDICAP_A,
+            draw_cards=R2,
+        ),
+        shot,
+        now,
+        root=tmp_path,
+    )
+    store.record(
+        SessionDecision(
+            recording=True,
+            session_id="game_50",
+            seq=4,
+            phase=GamePhase.FINISHED,
+            reason="test",
+            should_save=True,
+            game_id="50",
+            table_cards=(),
+            drawn_cards=R2,
+            locked_guess="Spades",
+            locked_guess_draws=R1 + R2,
+            locked_guess_rounds=2,
+        ),
+        ExtractionResult(
+            race_state=RaceState.FINISHED,
+            winner_suit=Suit.SPADES,
+            high_low=None,
+            confident=True,
+            handicap_cards=HANDICAP_A,
+            draw_cards=R2,
+        ),
+        shot,
+        now,
+        root=tmp_path,
+    )
+
+    game = store.get_game("50", root=tmp_path)
+    assert game is not None
+    assert game.draw_cards == R1 + R2
+
+    import json
+    import sqlite3
+
+    with sqlite3.connect(store.path) as con:
+        con.execute(
+            "UPDATE games SET draws_json=? WHERE game_id=?",
+            (json.dumps(list(R2)), "50"),
+        )
+        con.commit()
+    store.invalidate_similarity_cache()
+    fp = next(f for f in store.similarity_corpus() if f.game_id == "50")
+    assert len(fp.draw_cards) == 6
+    assert set(fp.draw_cards) == set(R1 + R2)

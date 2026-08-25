@@ -78,6 +78,25 @@ class StoredGame:
     frames: tuple[StoredFrame, ...]
 
 
+def _draws_beyond_handicap(
+    handicap: tuple[tuple[str, ...], ...],
+    table,
+) -> tuple[str, ...]:
+    """Cards on the suit table that are not handicap — best-effort full draw list."""
+    hc = {c for row in handicap for c in row if c}
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in table or []:
+        if not isinstance(item, (list, tuple)) or len(item) < 2:
+            continue
+        for card in item[1] or []:
+            if not card or str(card).startswith("?") or card in hc or card in seen:
+                continue
+            seen.add(card)
+            out.append(card)
+    return tuple(out)
+
+
 def _stored_all_draws(
     draw_cards: tuple[str, ...],
     frames: tuple[StoredFrame, ...],
@@ -187,6 +206,14 @@ class GameStore:
 
         with self._connect() as con:
             self._ensure_guess_columns(con)
+            # Never shrink draws_json: FINISHED OCR often returns only the last round.
+            existing = con.execute(
+                "SELECT draws_json FROM games WHERE game_id=?", (game_id,)
+            ).fetchone()
+            if existing is not None:
+                prev = parse_draw_list(json.loads(existing["draws_json"] or "[]"))
+                if len(prev) > len(cumulative_draws):
+                    cumulative_draws = list(prev)
             con.execute(
                 """
                 INSERT INTO games (game_id, started_at, finished_at, winner_suit,
@@ -414,7 +441,7 @@ class GameStore:
         return snap2, snap3
 
     def similarity_corpus(self, *, finished_only: bool = True):
-        """Fingerprints for similarity search — games table only (no frame/screenshot load)."""
+        """Fingerprints for similarity — rebuild draws from IN_PLAY frames (not short draws_json)."""
         from game_analyzer.similarity import GameFingerprint, build_fingerprint
 
         cached = self._similarity_corpus_cache
@@ -425,11 +452,29 @@ class GameStore:
         with self._connect(autocommit=True) as con:
             rows = con.execute(
                 """
-                SELECT game_id, winner_suit, handicap_json, draws_json, guess_draws_json
+                SELECT game_id, winner_suit, handicap_json, draws_json,
+                       guess_draws_json, table_json
                 FROM games
                 ORDER BY id ASC
                 """
             ).fetchall()
+            frame_rows = con.execute(
+                """
+                SELECT game_id, phase, draw_cards_json
+                FROM frames
+                ORDER BY game_id ASC, seq ASC
+                """
+            ).fetchall()
+
+        frames_by_game: dict[str, list[tuple[str, tuple[str, ...]]]] = {}
+        for fr in frame_rows:
+            frames_by_game.setdefault(fr["game_id"], []).append(
+                (
+                    fr["phase"],
+                    parse_draw_list(json.loads(fr["draw_cards_json"] or "[]")),
+                )
+            )
+
         for row in rows:
             winner = row["winner_suit"]
             if finished_only and not winner:
@@ -437,9 +482,16 @@ class GameStore:
             handicap = parse_handicap_rows(json.loads(row["handicap_json"] or "[]"))
             if not handicap:
                 continue
-            draws = parse_draw_list(json.loads(row["draws_json"] or "[]"))
-            if not draws:
-                draws = parse_draw_list(json.loads(row["guess_draws_json"] or "[]"))
+            raw = parse_draw_list(json.loads(row["draws_json"] or "[]"))
+            guess = parse_draw_list(json.loads(row["guess_draws_json"] or "[]"))
+            from_frames = all_draws_from_in_play_frames(
+                frames_by_game.get(row["game_id"], ())
+            )
+            table = json.loads(row["table_json"] or "[]")
+            from_table = _draws_beyond_handicap(handicap, table)
+            # Prefer the longest accurate source. Frames are best; table fills gaps
+            # when capture missed IN_PLAY rounds but still saved the suit table.
+            draws = max((from_frames, raw, guess, from_table), key=len)
             fp = build_fingerprint(
                 row["game_id"],
                 handicap,

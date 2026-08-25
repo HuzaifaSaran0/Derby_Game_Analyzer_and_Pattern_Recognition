@@ -122,3 +122,15 @@
 2026-08-25T14:01:32+00:00  [CANCEL] — Game 105324995 — Pick Clubs — Confidence LOW — 41% — gap +1 — MC 41% — 1 weak rivals — tight race (gap 1)
 2026-08-25T14:07:10+00:00  [BET] — Game 105325067 — Pick Hearts — Confidence MEDIUM — 54% — gap +7 — MC 54% — 2 weak rivals — track lead +7
 2026-08-25T14:09:31+00:00  [BET] — Game 105325087 — Pick Hearts — Confidence VERY_HIGH — 78% — gap +20 — MC 78% — 3 weak rivals — large track gap (20)
+2026-08-25T14:16:15+00:00  [BET] — Game 105325159 — Pick Diamonds — Confidence MEDIUM — 33% — gap +5 — MC 33% — 2 weak rivals — low MC (33%)
+2026-08-25T14:16:50+00:00  [CANCEL] — Game 105325159 — Pick Clubs — Confidence LOW — 42% — gap +2 — MC 42% — tight race (gap 2)
+2026-08-25T14:19:06+00:00  [BET] — Game 105325191 — Pick Spades — Confidence MEDIUM — 34% — gap +5 — MC 34% — 1 weak rivals — low MC (34%)
+2026-08-25T14:19:41+00:00  [UPGRADE] — Game 105325191 — Pick Spades — Confidence MEDIUM — 64% — gap +8 — MC 64% — 2 weak rivals — MC 64%
+2026-08-25T14:22:29+00:00  [BET] — Game 105325229 — Pick Spades — Confidence MEDIUM — 43% — gap +5 — MC 43% — 1 weak rivals — low MC (43%)
+2026-08-25T14:24:45+00:00  [BET] — Game 105325253 — Pick Spades — Confidence MEDIUM — 54% — gap +10 — MC 54% — 3 weak rivals — track lead +10
+2026-08-25T14:25:20+00:00  [UPGRADE] — Game 105325253 — Pick Spades — Confidence MEDIUM — 61% — gap +7 — MC 61% — 2 weak rivals — MC 61%
+2026-08-25T14:30:24+00:00  [BET] — Game 105325309 — Pick Diamonds — Confidence MEDIUM — 44% — gap +8 — MC 44% — 3 weak rivals — low MC (44%)
+2026-08-25T14:32:40+00:00  [BET] — Game 105325343 — Pick Clubs — Confidence VERY_HIGH — 80% — gap +21 — MC 80% — 3 weak rivals — large track gap (21)
+2026-08-25T14:35:11+00:00  [BET] — Game 105325369 — Pick Diamonds — Confidence MEDIUM — 47% — gap +7 — MC 47% — 2 weak rivals — track lead +7
+2026-08-25T14:35:25+00:00  [CANCEL] — Game 105325369 — Pick Diamonds — Confidence LOW — 38% — gap +1 — MC 38% — tight race (gap 1)
+2026-08-25T14:37:46+00:00  [BET] — Game 105325391 — Pick Spades — Confidence VERY_HIGH — 75% — gap +18 — MC 75% — 3 weak rivals — large track gap (18)
