@@ -40,6 +40,9 @@
     "allow_cancel": true,
     "mc_upgrade_delta": 0.05
   },
+  "similarity": {
+    "notify": true
+  },
   "consensus_frames": 3,
   "match_threshold": 0.75,
   "rois": {

@@ -71,7 +71,11 @@ class DemoApp(ctk.CTk):
             side="left", padx=(0, 6)
         )
         self.history_win = None
+        self.similar_win = None
         ctk.CTkButton(nav, text="History", width=88, command=self.open_history, **btn_style).pack(side="right")
+        ctk.CTkButton(nav, text="Similar", width=88, command=self.open_similar, **btn_style).pack(
+            side="right", padx=(0, 6)
+        )
         self.file_label = ctk.CTkLabel(
             nav,
             text="Start capture to begin",
@@ -131,6 +135,21 @@ class DemoApp(ctk.CTk):
             wraplength=860,
         )
         self._alert_banner_visible = False
+        self._twin_notified: set[str] = set()
+        self._twin_toast_job = None
+
+        self.twin_toast = ctk.CTkLabel(
+            self.header,
+            text="",
+            font=UI_FONT_SM,
+            text_color=UI_ACCENT,
+            fg_color=UI_PANEL_ALT,
+            corner_radius=8,
+            anchor="w",
+            justify="left",
+            wraplength=860,
+        )
+        self._twin_toast_visible = False
 
         self.main_scroll = ctk.CTkScrollableFrame(
             self,
@@ -140,7 +159,51 @@ class DemoApp(ctk.CTk):
         )
         self.main_scroll.pack(fill="both", expand=True, padx=12, pady=(0, 6))
 
-        top = ctk.CTkFrame(self.main_scroll, fg_color="transparent")
+        self._workspace_live = False
+        self.idle_panel = ctk.CTkFrame(
+            self.main_scroll,
+            fg_color=UI_PANEL,
+            corner_radius=12,
+            border_width=1,
+            border_color=UI_BORDER,
+            height=420,
+        )
+        self.idle_panel.pack(fill="both", expand=True, pady=(4, 8))
+        self.idle_panel.pack_propagate(False)
+        idle_inner = ctk.CTkFrame(self.idle_panel, fg_color="transparent")
+        idle_inner.place(relx=0.5, rely=0.48, anchor="center")
+        ctk.CTkLabel(
+            idle_inner,
+            text="Game Analyzer",
+            font=("Segoe UI", 28, "bold"),
+            text_color=UI_TEXT,
+        ).pack()
+        ctk.CTkLabel(
+            idle_inner,
+            text="Press  Start capture  to start the system",
+            font=("Segoe UI", 16),
+            text_color=UI_ACCENT,
+        ).pack(pady=(14, 6))
+        ctk.CTkLabel(
+            idle_inner,
+            text=(
+                "Live workspace stays clear until you begin —\n"
+                "preview, win chance, card table, and session data appear after the first capture."
+            ),
+            font=UI_FONT,
+            text_color=UI_MUTED,
+            justify="center",
+        ).pack(pady=(4, 0))
+        ctk.CTkLabel(
+            idle_inner,
+            text="History and Similar are available anytime from the toolbar.",
+            font=UI_FONT_SM,
+            text_color=UI_MUTED,
+        ).pack(pady=(18, 0))
+
+        self.live_wrap = ctk.CTkFrame(self.main_scroll, fg_color="transparent")
+
+        top = ctk.CTkFrame(self.live_wrap, fg_color="transparent")
         top.pack(fill="x", pady=(0, 4))
         top.grid_columnconfigure(0, weight=0)
         top.grid_columnconfigure(1, weight=1)
@@ -156,7 +219,14 @@ class DemoApp(ctk.CTk):
             border_color=UI_BORDER,
         )
         self.preview_frame.grid(row=0, column=0, sticky="nw")
-        self.preview = ctk.CTkLabel(self.preview_frame, text="", fg_color="transparent")
+        self.preview = ctk.CTkLabel(
+            self.preview_frame,
+            text="Waiting for first capture…",
+            font=UI_FONT,
+            text_color=UI_MUTED,
+            fg_color=UI_PANEL_ALT,
+            corner_radius=6,
+        )
         self.preview.pack(padx=4, pady=4)
 
         self.results_frame = ctk.CTkFrame(
@@ -278,7 +348,7 @@ class DemoApp(ctk.CTk):
 
         self.status = ctk.CTkLabel(
             self.main_scroll,
-            text="",
+            text="Ready — press Start capture when the game window is visible.",
             font=UI_FONT_MONO,
             justify="left",
             anchor="w",
@@ -291,7 +361,7 @@ class DemoApp(ctk.CTk):
         self.bind("<Configure>", self._on_window_configure, add="+")
 
         self._refresh_layout_widths()
-
+        self._apply_preview_placeholder()
     def _left_column_width(self, window_width: int) -> int:
         """Left column ~55% of window, leaving room for the right-hand panels."""
         target = int(window_width * 0.55)
@@ -318,13 +388,37 @@ class DemoApp(ctk.CTk):
             label.configure(wraplength=stats_wrap)
         self.remaining_favourite.configure(wraplength=stats_wrap)
 
+    def _apply_preview_placeholder(self) -> None:
+        if self._preview_rgb is not None:
+            return
+        width, height = self._preview_size(self._window_width)
+        self.preview.configure(
+            text="Waiting for first capture…",
+            image=None,
+            width=width,
+            height=height,
+            text_color=UI_MUTED,
+            fg_color=UI_PANEL_ALT,
+        )
+        self.preview.image = None
+
+    def _show_live_workspace(self) -> None:
+        if self._workspace_live:
+            return
+        self._workspace_live = True
+        self.idle_panel.pack_forget()
+        self.live_wrap.pack(fill="both", expand=True, before=self.status)
+        self._apply_preview_placeholder()
+        self._refresh_layout_widths()
+
     def _refresh_preview_image(self) -> None:
         if self._preview_rgb is None:
+            self._apply_preview_placeholder()
             return
         width, height = self._preview_size(self._window_width)
         image = Image.fromarray(self._preview_rgb).resize((width, height))
         photo = ctk.CTkImage(light_image=image, dark_image=image, size=(width, height))
-        self.preview.configure(image=photo)
+        self.preview.configure(image=photo, text="", fg_color="transparent")
         self.preview.image = photo
 
     def _on_window_configure(self, event) -> None:
@@ -335,6 +429,10 @@ class DemoApp(ctk.CTk):
         self.status.configure(wraplength=wrap)
         self.confidence_strip.configure(wraplength=wrap)
         self.alert_banner.configure(wraplength=wrap)
+        self.twin_toast.configure(wraplength=wrap)
+        if not self._workspace_live:
+            # Keep the idle hero filling most of the window.
+            self.idle_panel.configure(height=max(320, event.height - 220))
         self._refresh_layout_widths()
         self._refresh_preview_image()
 
@@ -504,6 +602,7 @@ class DemoApp(ctk.CTk):
         else:
             self.result_guess.configure(text="not locked yet (need 2 draw rounds)")
         guess_draws = locked_guess_draws if locked_guess_draws else drawn_cards
+        confidence = None
         if result.has_handicap_cards() and guess_draws:
             confidence = evaluate_confidence(
                 tuple(result.handicap_cards),
@@ -551,6 +650,12 @@ class DemoApp(ctk.CTk):
             self._set_alert_banner(visible=True, text=alert_message, kind=alert_kind)
         else:
             self._set_alert_banner(visible=False)
+        self._maybe_twin_notify(
+            handicap_cards=tuple(result.handicap_cards) if result.has_handicap_cards() else (),
+            draw_cards=tuple(guess_draws) if guess_draws else (),
+            confidence=confidence,
+            game_id=None,
+        )
         self.result_winner.configure(text=winner)
         phase = result.game_phase()
         phase_text = {
@@ -726,9 +831,81 @@ class DemoApp(ctk.CTk):
         self.history_win.focus()
         self._refresh_guess_stats()
 
+    def open_similar(self) -> None:
+        from game_analyzer.similar_ui import SimilarWindow
+
+        if self.similar_win is not None and self.similar_win.winfo_exists():
+            self.similar_win.reload()
+            self.similar_win.lift()
+            self.similar_win.focus()
+            return
+        self.similar_win = SimilarWindow(self, store=self.store)
+        self.similar_win.focus()
+
+    def _set_twin_toast(self, *, visible: bool, text: str = "") -> None:
+        if self._twin_toast_job is not None:
+            try:
+                self.after_cancel(self._twin_toast_job)
+            except Exception:
+                pass
+            self._twin_toast_job = None
+        if visible and text:
+            self.twin_toast.configure(text=f"  Twin  ·  {text}")
+            if not self._twin_toast_visible:
+                # Below confidence strip; never replaces the bet alert banner.
+                self.twin_toast.pack(fill="x", pady=(0, 4), after=self.confidence_strip)
+                self._twin_toast_visible = True
+            self._twin_toast_job = self.after(12000, lambda: self._set_twin_toast(visible=False))
+        elif self._twin_toast_visible:
+            self.twin_toast.pack_forget()
+            self._twin_toast_visible = False
+
+    def _maybe_twin_notify(
+        self,
+        *,
+        handicap_cards,
+        draw_cards: tuple[str, ...],
+        confidence: ConfidenceResult | None,
+        game_id: str | None,
+    ) -> None:
+        if not handicap_cards:
+            return
+        sim_cfg = self.config_data.get("similarity") or {}
+        if sim_cfg.get("notify", True) is False:
+            return
+        signal = self.store.live_twin_signal(
+            handicap_cards,
+            draw_cards,
+            confidence=confidence,
+            exclude_game_id=game_id,
+        )
+        if signal is None:
+            return
+        dedupe = (
+            f"{game_id or getattr(self, '_twin_game_id', 'live')}:"
+            f"{signal.stage.value}:{signal.suggested_winner}"
+        )
+        if dedupe in self._twin_notified:
+            return
+        self._twin_notified.add(dedupe)
+
+        from datetime import datetime, timezone
+
+        from game_analyzer.notify import DEFAULT_TWIN_LOG, append_twin_log, send_desktop_notification
+
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        append_twin_log(DEFAULT_TWIN_LOG, f"{stamp}  {signal.message}")
+        send_desktop_notification(
+            f"Twin winner: {signal.suggested_winner}",
+            signal.message,
+            urgency="critical",
+        )
+        self._set_twin_toast(visible=True, text=signal.message)
+
     def start_loop(self) -> None:
         if self.looping:
             return
+        self._show_live_workspace()
         region = self.config_data["capture"]
         wait = float(region.get("delay_seconds", 5))
         self.looping = True
@@ -745,6 +922,7 @@ class DemoApp(ctk.CTk):
                 f"then on the 10s / 32s round clock."
             )
         self.status.configure(text=hint)
+        self.file_label.configure(text="Capture starting…")
         self.after_id = self.after(int(wait * 1000), self._loop_tick)
 
     def stop_loop(self) -> None:
@@ -753,6 +931,10 @@ class DemoApp(ctk.CTk):
             self.after_cancel(self.after_id)
             self.after_id = None
         self.status.configure(text="Capture stopped.")
+        if not self._workspace_live:
+            self.file_label.configure(text="Start capture to begin")
+        else:
+            self.file_label.configure(text="Capture stopped — press Start capture to resume")
 
     def _loop_tick(self) -> None:
         if not self.looping:
@@ -760,8 +942,12 @@ class DemoApp(ctk.CTk):
         from game_analyzer.live import capture_once
 
         path, frame, _result, decision = capture_once(self.config_data)
+        gid = decision.game_id or decision.session_id
+        if gid and getattr(self, "_twin_game_id", None) != gid:
+            self._twin_game_id = gid
+            self._twin_notified.clear()
+            self._set_twin_toast(visible=False)
         if decision.recording:
-            gid = decision.game_id or decision.session_id
             self.last_session_text = f"{gid}  #{decision.seq}  next {decision.next_wait_seconds:.0f}s"
         else:
             self.last_session_text = (
@@ -806,6 +992,7 @@ class DemoApp(ctk.CTk):
         alert_kind: str | None = None,
         alert_message: str | None = None,
     ) -> None:
+        self._show_live_workspace()
         result = extract_real(frame, self.config_data)
         if not drawn_cards and result.draw_cards:
             drawn_cards = tuple(result.draw_cards)

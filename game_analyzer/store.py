@@ -132,6 +132,7 @@ class GameStore:
         self.root = root or ROOT
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._confidence_report_cache: tuple[tuple[object, ...], object] | None = None
+        self._similarity_corpus_cache: tuple[bool, tuple] | None = None
         with self._connect() as con:
             con.executescript(_SCHEMA)
             self._ensure_guess_columns(con)
@@ -163,6 +164,8 @@ class GameStore:
     ) -> None:
         if not decision.recording or not decision.should_save:
             return
+        self._similarity_corpus_cache = None
+        self._confidence_report_cache = None
         game_id = decision.game_id or decision.session_id
         if not game_id:
             return
@@ -388,6 +391,114 @@ class GameStore:
             seed=(seed + 1) if seed is not None else None,
         )
         return snap2, snap3
+
+    def similarity_corpus(self, *, finished_only: bool = True):
+        """Fingerprints for similarity search — games table only (no frame/screenshot load)."""
+        from game_analyzer.similarity import GameFingerprint, build_fingerprint
+
+        cached = self._similarity_corpus_cache
+        if cached is not None and cached[0] == finished_only:
+            return list(cached[1])
+
+        corpus: list[GameFingerprint] = []
+        with self._connect(autocommit=True) as con:
+            rows = con.execute(
+                """
+                SELECT game_id, winner_suit, handicap_json, draws_json, guess_draws_json
+                FROM games
+                ORDER BY id ASC
+                """
+            ).fetchall()
+        for row in rows:
+            winner = row["winner_suit"]
+            if finished_only and not winner:
+                continue
+            handicap = parse_handicap_rows(json.loads(row["handicap_json"] or "[]"))
+            if not handicap:
+                continue
+            draws = parse_draw_list(json.loads(row["draws_json"] or "[]"))
+            if not draws:
+                draws = parse_draw_list(json.loads(row["guess_draws_json"] or "[]"))
+            fp = build_fingerprint(
+                row["game_id"],
+                handicap,
+                draws,
+                winner_suit=winner,
+            )
+            if fp is not None:
+                corpus.append(fp)
+        self._similarity_corpus_cache = (finished_only, tuple(corpus))
+        return list(corpus)
+
+    def similarity_clusters(self, *, exact_only: bool = False):
+        from game_analyzer.similarity import build_clusters
+
+        return build_clusters(self.similarity_corpus(), exact_only=exact_only)
+
+    def invalidate_similarity_cache(self) -> None:
+        self._similarity_corpus_cache = None
+
+    def find_similar_to(
+        self,
+        game_id: str | None = None,
+        *,
+        handicap_cards=None,
+        draw_cards: tuple[str, ...] = (),
+        exact_only: bool = False,
+        exclude_game_id: str | None = None,
+    ):
+        """Find similar finished games for a stored game id or live card state."""
+        from game_analyzer.similarity import build_fingerprint, find_matches
+
+        corpus = self.similarity_corpus()
+        if game_id:
+            query = next((fp for fp in corpus if fp.game_id == game_id), None)
+            if query is None:
+                game = self.get_game(game_id)
+                if game is None:
+                    return []
+                query = build_fingerprint(
+                    game.game_id,
+                    game.handicap_cards,
+                    game.draw_cards or game.guess_draw_cards,
+                    winner_suit=game.winner_suit,
+                )
+            if query is None:
+                return []
+            return find_matches(query, corpus, exact_only=exact_only)
+
+        if handicap_cards is None:
+            return []
+        qid = exclude_game_id or "__live__"
+        query = build_fingerprint(qid, handicap_cards, draw_cards, winner_suit=None)
+        if query is None:
+            return []
+        return find_matches(query, corpus, exact_only=exact_only)
+
+    def live_twin_signal(
+        self,
+        handicap_cards,
+        draw_cards: tuple[str, ...] = (),
+        *,
+        confidence=None,
+        exclude_game_id: str | None = None,
+    ):
+        from game_analyzer.similarity import build_fingerprint, evaluate_live_twin
+
+        query = build_fingerprint(
+            exclude_game_id or "__live__",
+            handicap_cards,
+            draw_cards,
+            winner_suit=None,
+        )
+        if query is None:
+            return None
+        corpus = [
+            fp
+            for fp in self.similarity_corpus()
+            if exclude_game_id is None or fp.game_id != exclude_game_id
+        ]
+        return evaluate_live_twin(query, corpus, confidence=confidence)
 
     def pre_race_outcome_for(self, game_id: str) -> PreRaceOutcome | None:
         game = self.get_game(game_id)
