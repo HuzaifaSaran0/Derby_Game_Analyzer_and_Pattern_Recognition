@@ -142,3 +142,49 @@
 2026-08-25T15:08:00+00:00  [BET] — Game 105325721 — Pick Clubs — Confidence VERY_HIGH — 68% — gap +16 — MC 68% — 3 weak rivals — large track gap (16)
 2026-08-25T15:11:49+00:00  [BET] — Game 105325753 — Pick Spades — Confidence MEDIUM — 74% — gap +10 — MC 74% — 2 weak rivals — MC 74%
 2026-08-25T15:14:11+00:00  [BET] — Game 105325791 — Pick Spades — Confidence MEDIUM — 40% — gap +8 — MC 40% — 3 weak rivals — low MC (40%)
+2026-08-25T15:19:18+00:00  [BET] — Game 105325847 — Pick Diamonds — Confidence MEDIUM — 52% — gap +7 — MC 52% — 2 weak rivals — track lead +7
+2026-08-25T15:19:44+00:00  [CANCEL] — Game 105325847 — Pick Diamonds — Confidence LOW — 53% — gap +3 — MC 53% — 2 weak rivals — tight race (gap 3)
+2026-08-25T15:22:04+00:00  [BET] — Game 105325879 — Pick Hearts — Confidence MEDIUM — 44% — gap +5 — MC 44% — 1 weak rivals — low MC (44%)
+2026-08-25T15:22:39+00:00  [CANCEL] — Game 105325879 — Pick Diamonds — Confidence LOW — 38% — gap +2 — MC 38% — 1 weak rivals — tight race (gap 2)
+2026-08-25T15:24:52+00:00  [BET] — Game 105325907 — Pick Spades — Confidence MEDIUM — 45% — gap +7 — MC 45% — 2 weak rivals — track lead +7
+2026-08-25T15:25:27+00:00  [UPGRADE] — Game 105325907 — Pick Spades — Confidence MEDIUM — 61% — gap +6 — MC 61% — 2 weak rivals — MC 61%
+2026-08-25T15:27:42+00:00  [BET] — Game 105325939 — Pick Diamonds — Confidence MEDIUM — 55% — gap +12 — MC 55% — 3 weak rivals — track lead +12
+2026-08-25T15:31:04+00:00  [BET] — Game 105325971 — Pick Hearts — Confidence MEDIUM — 69% — gap +12 — MC 69% — 2 weak rivals — MC 69%
+2026-08-25T15:36:38+00:00  [BET] — Game 105326033 — Pick Hearts — Confidence VERY_HIGH — 79% — gap +16 — MC 79% — 2 weak rivals — large track gap (16)
+2026-08-25T15:40:00+00:00  [BET] — Game 105326067 — Pick Spades — Confidence VERY_HIGH — 68% — gap +15 — MC 68% — 3 weak rivals — large track gap (15)
+2026-08-25T15:42:15+00:00  [BET] — Game 105326089 — Pick Spades — Confidence MEDIUM — 70% — gap +14 — MC 70% — 3 weak rivals — MC 70%
+2026-08-25T15:42:49+00:00  [CANCEL] — Game 105326089 — Pick Spades — Confidence LOW — 51% — gap +2 — MC 51% — 2 weak rivals — tight race (gap 2)
+2026-08-25T15:46:10+00:00  [BET] — Game 105326123 — Pick Hearts — Confidence MEDIUM — 50% — gap +5 — MC 50% — track lead +5
+2026-08-25T15:53:00+00:00  [BET] — Game 105326203 — Pick Diamonds — Confidence VERY_HIGH — 66% — gap +15 — MC 66% — 3 weak rivals — large track gap (15)
+2026-08-25T15:56:53+00:00  [BET] — Game 105326241 — Pick Diamonds — Confidence MEDIUM — 54% — gap +8 — MC 54% — 1 weak rivals — track lead +8
+2026-08-25T16:03:01+00:00  [BET] — Game 105326313 — Pick Clubs — Confidence VERY_HIGH — 78% — gap +20 — MC 78% — 3 weak rivals — large track gap (20)
+2026-08-25T16:05:50+00:00  [BET] — Game 105326341 — Pick Hearts — Confidence MEDIUM — 58% — gap +11 — MC 58% — 3 weak rivals — MC 58%
+2026-08-25T16:08:07+00:00  [BET] — Game 105326365 — Pick Hearts — Confidence MEDIUM — 59% — gap +10 — MC 59% — 3 weak rivals — MC 59%
+2026-08-25T16:11:28+00:00  [BET] — Game 105326397 — Pick Diamonds — Confidence MEDIUM — 49% — gap +12 — MC 49% — 3 weak rivals — track lead +12
+2026-08-25T16:12:02+00:00  [CANCEL] — Game 105326397 — Pick Spades — Confidence LOW — 50% — gap +1 — MC 50% — 2 weak rivals — tight race (gap 1)
+2026-08-25T16:14:17+00:00  [BET] — Game 105326419 — Pick Spades — Confidence MEDIUM — 40% — gap +5 — MC 40% — 1 weak rivals — low MC (40%)
+2026-08-25T16:14:51+00:00  [UPGRADE] — Game 105326419 — Pick Spades — Confidence VERY_HIGH — 69% — gap +17 — MC 69% — 3 weak rivals — large track gap (17)
+2026-08-25T16:20:25+00:00  [BET] — Game 105326497 — Pick Spades — Confidence VERY_HIGH — 77% — gap +17 — MC 77% — 3 weak rivals — large track gap (17)
+2026-08-25T16:23:49+00:00  [BET] — Game 105326523 — Pick Hearts — Confidence MEDIUM — 69% — gap +11 — MC 69% — 2 weak rivals — MC 69%
+2026-08-25T16:27:10+00:00  [BET] — Game 105326563 — Pick Diamonds — Confidence MEDIUM — 58% — gap +7 — MC 58% — 2 weak rivals — MC 58%
+2026-08-25T16:33:18+00:00  [BET] — Game 105326637 — Pick Diamonds — Confidence MEDIUM — 67% — gap +10 — MC 67% — 2 weak rivals — MC 67%
+2026-08-25T16:43:53+00:00  [BET] — Game 105326751 — Pick Spades — Confidence MEDIUM — 48% — gap +5 — MC 48% — 2 weak rivals — track lead +5
+2026-08-25T16:44:19+00:00  [CANCEL] — Game 105326751 — Pick Diamonds — Confidence LOW — 34% — gap +2 — MC 34% — 2 weak rivals — tight race (gap 2)
+2026-08-25T17:48:16+00:00  [BET] — Game 105327431 — Pick Clubs — Confidence MEDIUM — 58% — gap +4 — MC 58% — 1 weak rivals — tight race (gap 4)
+2026-08-25T17:50:38+00:00  [BET] — Game 105327457 — Pick Hearts — Confidence MEDIUM — 43% — gap +6 — MC 43% — 2 weak rivals — low MC (43%)
+2026-08-25T17:54:26+00:00  [BET] — Game 105327497 — Pick Clubs — Confidence MEDIUM — 73% — gap +12 — MC 73% — MC 73%
+2026-08-25T17:57:21+00:00  [BET] — Game 105327527 — Pick Diamonds — Confidence MEDIUM — 74% — gap +13 — MC 74% — 2 weak rivals — MC 74%
+2026-08-25T18:04:30+00:00  [BET] — Game 105327599 — Pick Diamonds — Confidence MEDIUM — 54% — gap +10 — MC 54% — 2 weak rivals — track lead +10
+2026-08-25T18:07:50+00:00  [BET] — Game 105327639 — Pick Spades — Confidence VERY_HIGH — 81% — gap +18 — MC 81% — 2 weak rivals — large track gap (18)
+2026-08-25T18:11:16+00:00  [BET] — Game 105327675 — Pick Hearts — Confidence MEDIUM — 48% — gap +6 — MC 48% — 2 weak rivals — track lead +6
+2026-08-25T18:17:21+00:00  [BET] — Game 105327737 — Pick Spades — Confidence MEDIUM — 54% — gap +8 — MC 54% — 1 weak rivals — track lead +8
+2026-08-25T18:19:45+00:00  [BET] — Game 105327771 — Pick Spades — Confidence MEDIUM — 69% — gap +14 — MC 69% — 3 weak rivals — MC 69%
+2026-08-25T18:20:10+00:00  [CANCEL] — Game 105327771 — Pick Spades — Confidence LOW — 44% — gap +0 — MC 44% — 1 weak rivals — tight race (gap 0)
+2026-08-25T18:22:34+00:00  [BET] — Game 105327795 — Pick Clubs — Confidence MEDIUM — 40% — gap +6 — MC 40% — 2 weak rivals — low MC (40%)
+2026-08-25T18:31:26+00:00  [BET] — Game 105327891 — Pick Clubs — Confidence MEDIUM — 44% — gap +5 — MC 44% — low MC (44%)
+2026-08-25T18:34:17+00:00  [BET] — Game 105327929 — Pick Hearts — Confidence MEDIUM — 55% — gap +7 — MC 55% — 2 weak rivals — MC 55%
+2026-08-25T18:34:53+00:00  [UPGRADE] — Game 105327929 — Pick Diamonds — Confidence MEDIUM — 56% — gap +8 — MC 56% — 1 weak rivals — MC 56%
+2026-08-25T18:37:41+00:00  [BET] — Game 105327963 — Pick Hearts — Confidence MEDIUM — 73% — gap +10 — MC 73% — 2 weak rivals — MC 73%
+2026-08-25T18:40:24+00:00  [BET] — Game 105327987 — Pick Clubs — Confidence MEDIUM — 55% — gap +9 — MC 55% — MC 55%
+2026-08-25T18:45:02+00:00  [BET] — Game 105328041 — Pick Spades — Confidence MEDIUM — 51% — gap +11 — MC 51% — 3 weak rivals — track lead +11
+2026-08-25T18:45:29+00:00  [UPGRADE] — Game 105328041 — Pick Spades — Confidence VERY_HIGH — 98% — gap +23 — MC 98% — 3 weak rivals — large track gap (23)

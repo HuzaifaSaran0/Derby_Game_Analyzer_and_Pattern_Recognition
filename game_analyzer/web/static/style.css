@@ -43,6 +43,18 @@ a { color: var(--accent); }
   margin-bottom: 12px;
 }
 
+.site-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.site-brand {
+  min-width: 0;
+  flex: 1;
+}
+
 .site-brand h1 {
   margin: 0 0 4px;
   font-size: 1.25rem;
@@ -51,6 +63,119 @@ a { color: var(--accent); }
 .site-brand h1 a {
   color: var(--text);
   text-decoration: none;
+}
+
+.alert-bell-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.alert-bell-btn {
+  position: relative;
+  width: var(--touch);
+  height: var(--touch);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.alert-bell-btn.has-new {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+  color: var(--warn);
+}
+.alert-bell-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+.alert-bell-badge[hidden] { display: none !important; }
+
+.alert-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(92vw, 360px);
+  max-height: min(70vh, 480px);
+  overflow: auto;
+  z-index: 40;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+.alert-panel[hidden] { display: none !important; }
+.alert-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.alert-panel-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.alert-panel-hint {
+  margin: 0 0 10px;
+  font-size: 0.75rem;
+}
+.alert-panel-list {
+  display: grid;
+  gap: 8px;
+}
+.alert-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-alt);
+}
+.alert-item.is-bet {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+.alert-item.is-upgrade {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.alert-item.is-cancel {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+.alert-item-kind {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-right: 8px;
+}
+.alert-item-when {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.alert-item-msg {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.btn.is-on {
+  background: var(--success);
+  color: #0d1117;
+  border-color: transparent;
 }
 
 .site-nav {
@@ -135,70 +260,6 @@ a { color: var(--accent); }
   color: #7ee787;
   background: #1a3d2a;
   border-color: #2d5a3a;
-}
-
-.alert-dock {
-  margin-bottom: 12px;
-  padding: 12px 14px;
-}
-.alert-dock-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-.alert-dock-status {
-  font-size: 0.82rem;
-}
-.alert-dock-hint {
-  margin: 8px 0 0;
-  font-size: 0.78rem;
-}
-.btn.is-on {
-  background: var(--success);
-  color: #0d1117;
-  border-color: transparent;
-}
-.alert-banner {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border));
-  background: color-mix(in srgb, var(--warn) 14%, var(--panel));
-}
-.alert-banner[hidden] { display: none !important; }
-.alert-banner.is-bet {
-  border-color: color-mix(in srgb, var(--success) 55%, var(--border));
-  background: color-mix(in srgb, var(--success) 14%, var(--panel));
-}
-.alert-banner.is-upgrade {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
-}
-.alert-banner.is-cancel {
-  border-color: color-mix(in srgb, #ff5a67 55%, var(--border));
-  background: color-mix(in srgb, #ff5a67 12%, var(--panel));
-}
-.alert-banner.flash {
-  animation: alert-flash 0.7s ease;
-}
-@keyframes alert-flash {
-  0% { transform: scale(1); }
-  35% { transform: scale(1.015); }
-  100% { transform: scale(1); }
-}
-.alert-kind {
-  display: inline-block;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  margin-bottom: 4px;
-}
-.alert-text {
-  margin: 0;
-  font-size: 0.88rem;
-  line-height: 1.35;
-  font-family: ui-monospace, Consolas, monospace;
 }
 
 /* Idle hero — must respect [hidden] (display:flex otherwise wins) */

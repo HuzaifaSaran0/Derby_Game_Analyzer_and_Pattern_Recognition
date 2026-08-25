@@ -191,8 +191,10 @@ def test_similar_and_stats_api(tmp_path: Path):
     assert "latest" in alerts
     assert "enabled" in alerts
     page = client.get("/")
-    assert "Enable alert sound" in page.text
-    assert 'data-alert-dock' in page.text
+    assert 'data-alert-bell' in page.text
+    assert "/static/alerts.js" in page.text
+    assert "data-alert-dock" not in page.text
+    assert "alert-banner" not in page.text
 
 
 def test_api_games_and_game_payload(tmp_path: Path):
