@@ -56,6 +56,10 @@ def _win_chance_rows(game) -> list[dict]:
     favourite = game.guess_suit if game.guess_suit else (snap.guess if snap.guess_ready else None)
     preview = snap.preview
     rows = []
+
+    def pct(value: float | None) -> str:
+        return f"{value * 100:.0f}%" if value is not None else "?"
+
     for suit_name in ("Spades", "Hearts", "Clubs", "Diamonds"):
         style = SUIT_STYLES[suit_name]
         deck = snap.deck_remaining.get(suit_name)
@@ -81,18 +85,18 @@ def _win_chance_rows(game) -> list[dict]:
         )
         is_preview = favourite is None and suit_name == preview and snap.draw_rounds_used > 0
         if snap.draw_rounds_used == 0:
-            text = f"score {combined * 100:.0f}%  ·  deck {deck_p * 100:.0f}%"
+            text = f"score {pct(combined)}  ·  deck {pct(deck_p)}"
         elif favourite:
             text = (
-                f"score {combined * 100:.0f}%  ·  "
-                f"deck {deck_p * 100:.0f}%  ·  track {track_p * 100:.0f}%  ·  "
-                f"finish {expected_p * 100:.0f}%  ·  combo {combo_p * 100:.0f}%"
+                f"score {pct(combined)}  ·  "
+                f"deck {pct(deck_p)}  ·  track {pct(track_p)}  ·  "
+                f"finish {pct(expected_p)}  ·  combo {pct(combo_p)}"
             )
         else:
             text = (
-                f"score {combined * 100:.0f}%  ·  "
-                f"deck {deck_p * 100:.0f}%  ·  track {track_p * 100:.0f}%  ·  "
-                f"finish {expected_p * 100:.0f}%"
+                f"score {pct(combined)}  ·  "
+                f"deck {pct(deck_p)}  ·  track {pct(track_p)}  ·  "
+                f"finish {pct(expected_p)}"
             )
         rows.append(
             {

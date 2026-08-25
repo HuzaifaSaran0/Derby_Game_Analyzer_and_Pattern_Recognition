@@ -680,6 +680,10 @@ class DemoApp(ctk.CTk):
         favourite = locked_guess if locked_guess else (snap.guess if snap.guess_ready else None)
         preview = snap.preview
         rounds_label = locked_guess_rounds or snap.draw_rounds_used
+
+        def pct(value: float | None) -> str:
+            return f"{value * 100:.0f}%" if value is not None else "?"
+
         for suit_name, label in self.remaining_rows.items():
             deck = snap.deck_remaining.get(suit_name)
             if deck is None:
@@ -695,18 +699,18 @@ class DemoApp(ctk.CTk):
             )
             is_preview = favourite is None and suit_name == preview and snap.draw_rounds_used > 0
             if snap.draw_rounds_used == 0:
-                text = f"score {combined * 100:.0f}%  ·  deck {deck_p * 100:.0f}%"
+                text = f"score {pct(combined)}  ·  deck {pct(deck_p)}"
             elif favourite:
                 text = (
-                    f"score {combined * 100:.0f}%  ·  "
-                    f"deck {deck_p * 100:.0f}%  ·  track {track_p * 100:.0f}%  ·  "
-                    f"finish {expected_p * 100:.0f}%  ·  combo {combo_p * 100:.0f}%"
+                    f"score {pct(combined)}  ·  "
+                    f"deck {pct(deck_p)}  ·  track {pct(track_p)}  ·  "
+                    f"finish {pct(expected_p)}  ·  combo {pct(combo_p)}"
                 )
             else:
                 text = (
-                    f"score {combined * 100:.0f}%  ·  "
-                    f"deck {deck_p * 100:.0f}%  ·  track {track_p * 100:.0f}%  ·  "
-                    f"finish {expected_p * 100:.0f}%"
+                    f"score {pct(combined)}  ·  "
+                    f"deck {pct(deck_p)}  ·  track {pct(track_p)}  ·  "
+                    f"finish {pct(expected_p)}"
                 )
             if is_best and favourite:
                 color = SUIT_STYLES[suit_name]["color"]
