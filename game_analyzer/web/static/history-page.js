@@ -8,6 +8,7 @@
   let shotCount = 0;
   let shotsLoadedFor = null;
   let lastSig = "";
+  let loadGen = 0;
   const lightbox = document.getElementById("lightbox");
   const lightboxImg = lightbox ? lightbox.querySelector("img") : null;
   const lightboxStatus = lightbox ? lightbox.querySelector(".lightbox-status") : null;
@@ -127,13 +128,16 @@
   async function loadShots() {
     if (!gameId || !showBtn) return;
     if (shotsLoadedFor === gameId) return;
+    const forId = gameId;
     showBtn.disabled = true;
     showBtn.textContent = "Loading…";
     try {
-      const data = await live.get("/api/history/" + encodeURIComponent(gameId) + "/shots");
-      shotsLoadedFor = gameId;
+      const data = await live.get("/api/history/" + encodeURIComponent(forId) + "/shots");
+      if (forId !== gameId) return;
+      shotsLoadedFor = forId;
       renderShots(data.frames || []);
     } catch (_e) {
+      if (forId !== gameId) return;
       showBtn.disabled = false;
       showBtn.textContent = "See screenshots (" + shotCount + ")";
     }
@@ -170,35 +174,54 @@
     setNav("latest", nav.latest_id && nav.latest_id !== data.game_id ? nav.latest_id : null);
   }
 
-  async function load(id) {
-    if (!id) return;
-    const data = await live.get("/api/history/" + encodeURIComponent(id));
-    apply(data);
-    lastSig = JSON.stringify({
+  function sigOf(data) {
+    return JSON.stringify({
       id: data.game_id,
       winner: data.winner,
       shot_count: data.shot_count,
       guess: data.guess_text,
+      index: data.index,
+      total: data.total,
+      prev_id: data.prev_id || null,
+      next_id: data.next_id || null,
     });
   }
 
-  document.querySelector('[data-nav="prev"]').addEventListener("click", async function () {
-    if (!nav.prev_id) return;
+  async function load(id) {
+    if (!id) return;
+    const gen = ++loadGen;
+    // Lock target immediately so the live poll cannot race back to the old game.
+    gameId = id;
+    setNav("prev", null);
+    setNav("next", null);
+    setNav("latest", null);
+    const data = await live.get("/api/history/" + encodeURIComponent(id));
+    if (gen !== loadGen) return;
+    apply(data);
+    lastSig = sigOf(data);
+  }
+
+  async function go(direction) {
+    const target =
+      direction === "prev"
+        ? nav.prev_id
+        : direction === "next"
+          ? nav.next_id
+          : nav.latest_id;
+    if (!target || target === gameId) return;
     try {
-      await load(nav.prev_id);
+      await load(target);
     } catch (_e) {}
+  }
+
+  document.querySelector('[data-nav="prev"]').addEventListener("click", function () {
+    go("prev");
   });
-  document.querySelector('[data-nav="next"]').addEventListener("click", async function () {
-    if (!nav.next_id) return;
-    try {
-      await load(nav.next_id);
-    } catch (_e) {}
+  document.querySelector('[data-nav="next"]').addEventListener("click", function () {
+    go("next");
   });
-  document.querySelector('[data-nav="latest"]').addEventListener("click", async function () {
-    if (!nav.latest_id) return;
-    try {
-      await load(nav.latest_id);
-    } catch (_e) {}
+  document.querySelector('[data-nav="latest"]').addEventListener("click", function () {
+    go("latest");
   });
 
   if (showBtn) showBtn.addEventListener("click", loadShots);
@@ -247,14 +270,13 @@
         }
         gameId = games[0].game_id;
       }
-      const data = await live.get("/api/history/" + encodeURIComponent(gameId));
-      const sig = JSON.stringify({
-        id: data.game_id,
-        winner: data.winner,
-        shot_count: data.shot_count,
-        guess: data.guess_text,
-      });
+      const requestedId = gameId;
+      const gen = loadGen;
+      const data = await live.get("/api/history/" + encodeURIComponent(requestedId));
+      // Ignore stale poll responses after Prev/Next/Latest navigation.
+      if (gen !== loadGen || requestedId !== gameId) return;
       live.stamp(true, data.index + "/" + data.total);
+      const sig = sigOf(data);
       if (sig === lastSig) return;
       lastSig = sig;
       apply(data);

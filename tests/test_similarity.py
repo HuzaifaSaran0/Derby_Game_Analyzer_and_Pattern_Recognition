@@ -20,6 +20,8 @@ from game_analyzer.store import GameStore
 
 HANDICAP_A = (("AS", "KS", "QS"), ("2H", "3H", "4H"), ("6C", "8C", "9C"), ("10D", "JD", "QD"))
 HANDICAP_NEAR = (("AS", "KS", "JS"), ("2H", "3H", "4H"), ("6C", "8C", "9C"), ("10D", "JD", "QD"))
+# 8 shared → Jaccard 0.50 — below tightened near threshold (0.60 / ≥9 shared).
+HANDICAP_WEAK = (("AS", "KS", "JS"), ("2H", "3H", "5H"), ("6C", "8C", "TC"), ("10D", "JD", "KD"))
 HANDICAP_B = (("2S", "3S", "4S"), ("AH", "KH", "QH"), ("2C", "3C", "4C"), ("5D", "6D", "7D"))
 R1 = ("5H", "7S", "AD")
 R2 = ("3C", "6D", "4S")
@@ -37,7 +39,45 @@ def test_exact_handicap_match():
     near = compare_fingerprints(a, c)
     assert near is not None
     assert not near.exact
-    assert near.match_pct >= 50.0
+    assert near.match_pct >= 60.0
+
+
+def test_near_requires_stronger_overlap():
+    a = build_fingerprint("1", HANDICAP_A, (), winner_suit="Spades")
+    weak = build_fingerprint("w", HANDICAP_WEAK, (), winner_suit="Hearts")
+    assert a and weak
+    assert compare_fingerprints(a, weak) is None
+
+
+def test_cluster_badges_distinguish_exact_and_near():
+    from game_analyzer.similarity import cluster_kind_badge, build_clusters
+
+    handicap_near2 = (
+        ("AS", "KS", "10S"),
+        ("2H", "3H", "4H"),
+        ("6C", "8C", "9C"),
+        ("10D", "JD", "QD"),
+    )
+    corpus = [
+        fp
+        for fp in (
+            build_fingerprint("1", HANDICAP_A, (), winner_suit="Spades"),
+            build_fingerprint("2", HANDICAP_A, (), winner_suit="Spades"),
+            build_fingerprint("3", HANDICAP_NEAR, (), winner_suit="Spades"),
+            build_fingerprint("4", handicap_near2, (), winner_suit="Hearts"),
+        )
+        if fp is not None
+    ]
+    clusters = build_clusters(corpus)
+    exact = next(c for c in clusters if c.exact)
+    assert cluster_kind_badge(exact) == "EXACT"
+    near_only = [c for c in clusters if not c.exact]
+    assert near_only
+    assert near_only[0].winners_same is True
+    assert "same winners" in cluster_kind_badge(near_only[0]).lower()
+    mixed = next(c for c in near_only if c.winners_same is False)
+    assert "mixed" in cluster_kind_badge(mixed).lower()
+    assert "browse only" in cluster_kind_badge(mixed).lower()
 
 
 def test_deeper_exact_stage_preferred():

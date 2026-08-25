@@ -11,7 +11,12 @@ from fastapi.templating import Jinja2Templates
 from game_analyzer.confidence import evaluate_confidence, format_confidence_text
 from game_analyzer.confidence_stats import format_round_snapshot
 from game_analyzer.race_values import pre_race_outcome, race_snapshot
-from game_analyzer.similarity import format_cluster_headline
+from game_analyzer.similarity import (
+    NEAR_SHARED_MIN,
+    cluster_badge_kind,
+    cluster_kind_badge,
+    format_cluster_headline,
+)
 from game_analyzer.store import GameStore
 from game_analyzer.web.cards import (
     SUIT_STYLES,
@@ -27,7 +32,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "13"
+STATIC_VER = "15"
 
 
 def _neighbors(game_ids: list[str], game_id: str) -> tuple[str | None, str | None]:
@@ -263,15 +268,22 @@ def _similar_payload(store: GameStore, *, exact_only: bool = False) -> dict:
     exact_n = sum(1 for c in clusters if c.exact)
     near_n = sum(1 for c in clusters if not c.exact)
     games = {g.game_id for c in clusters for g in c.games}
+    near_same_n = sum(1 for c in clusters if not c.exact and c.winners_same)
+    near_mixed_n = sum(1 for c in clusters if not c.exact and c.winners_same is False)
     return {
         "corpus_n": len(corpus),
         "cluster_count": len(clusters),
         "exact_n": exact_n,
         "near_n": near_n,
+        "near_same_n": near_same_n,
+        "near_mixed_n": near_mixed_n,
+        "near_shared_min": NEAR_SHARED_MIN,
         "games_shown": len(games),
         "clusters": [
             {
                 "headline": format_cluster_headline(c),
+                "badge": cluster_kind_badge(c),
+                "badge_kind": cluster_badge_kind(c),
                 "key": c.key,
                 "exact": c.exact,
                 "stage": c.stage.value,

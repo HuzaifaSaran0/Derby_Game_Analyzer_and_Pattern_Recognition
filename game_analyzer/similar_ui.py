@@ -8,7 +8,14 @@ import customtkinter as ctk
 from PIL import Image
 
 from game_analyzer.race_values import SUIT_NAMES
-from game_analyzer.similarity import GameFingerprint, SimilarityCluster, format_cluster_headline
+from game_analyzer.similarity import (
+    NEAR_SHARED_MIN,
+    GameFingerprint,
+    SimilarityCluster,
+    cluster_badge_kind,
+    cluster_kind_badge,
+    format_cluster_headline,
+)
 from game_analyzer.store import GameStore
 
 THUMB = (220, 132)
@@ -155,7 +162,7 @@ class SimilarWindow(ctk.CTkToplevel):
             msg = (
                 f"Scanned {corpus_n} finished games with full handicap. "
                 "No exact twins yet, and no pairs at the near threshold "
-                "(≥50% Jaccard / about 8 of 12 handicap cards)."
+                f"(≥{NEAR_SHARED_MIN}/12 handicap cards shared)."
                 if corpus_n
                 else "No finished games with full handicap cards yet."
             )
@@ -174,11 +181,17 @@ class SimilarWindow(ctk.CTkToplevel):
             return
 
         if exact_n == 0 and near_n and not exact_only:
+            near_same = sum(1 for c in self._clusters if not c.exact and c.winners_same)
+            near_mixed = sum(
+                1 for c in self._clusters if not c.exact and c.winners_same is False
+            )
             ctk.CTkLabel(
                 self.body,
                 text=(
                     f"No exact twins among {corpus_n} finished games yet. "
-                    "Showing closest near matches (≥8/12 handicap cards shared)."
+                    f"Showing near matches (≥{NEAR_SHARED_MIN}/12 shared) — "
+                    f"{near_same} same-winner, {near_mixed} mixed. "
+                    "Near is browse-only, not a bet signal."
                 ),
                 text_color=UI_WARN,
                 wraplength=900,
@@ -224,22 +237,34 @@ class SimilarWindow(ctk.CTkToplevel):
         )
         box.pack(fill="x", padx=4, pady=8)
 
-        kind_color = UI_SUCCESS if cluster.exact else UI_WARN
+        kind = cluster_badge_kind(cluster)
+        if kind == "exact":
+            kind_color = UI_SUCCESS
+        elif kind == "near-same":
+            kind_color = UI_WARN
+        else:
+            kind_color = UI_MUTED
+        ctk.CTkLabel(
+            box,
+            text=cluster_kind_badge(cluster),
+            font=("Segoe UI", 12, "bold"),
+            text_color=kind_color,
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(10, 0))
         ctk.CTkLabel(
             box,
             text=format_cluster_headline(cluster),
-            font=("Segoe UI", 13, "bold"),
-            text_color=kind_color,
+            font=("Segoe UI", 12),
+            text_color=UI_MUTED,
             anchor="w",
-        ).pack(fill="x", padx=12, pady=(10, 4))
+        ).pack(fill="x", padx=12, pady=(2, 4))
 
         winner_bits = [f"{suit}×{count}" for suit, count in cluster.winner_counts]
         winner_line = " · ".join(winner_bits) if winner_bits else "no winners stored"
         same = cluster.winners_same
-        same_note = "same winners" if same else ("mixed winners" if same is False else "")
         ctk.CTkLabel(
             box,
-            text=f"Winners: {winner_line}" + (f"  ({same_note})" if same_note else ""),
+            text=f"Winners: {winner_line}",
             font=("Consolas", 12),
             text_color=UI_TEXT if same else UI_MUTED,
             anchor="w",

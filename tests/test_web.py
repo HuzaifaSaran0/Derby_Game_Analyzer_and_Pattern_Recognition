@@ -121,6 +121,50 @@ def test_home_includes_live_script(tmp_path: Path):
     assert "All games" not in response.text
 
 
+def test_history_neighbors_finished_only(tmp_path: Path):
+    store = GameStore(tmp_path / "games.sqlite", root=tmp_path)
+    shot = tmp_path / "001.png"
+    shot.write_bytes(PNG)
+    now = datetime(2026, 8, 18, 18, 0, 0)
+    for gid, winner in (("100", Suit.CLUBS), ("101", Suit.SPADES)):
+        store.record(
+            _decision(game_id=gid, session_id=f"game_{gid}", seq=1),
+            _result(),
+            shot,
+            now,
+        )
+        store.record(
+            _decision(
+                game_id=gid,
+                session_id=f"game_{gid}",
+                seq=2,
+                phase=GamePhase.FINISHED,
+                table_cards=(("Spades", ("AS", "2S", "KS")), ("Hearts", ("4H",))),
+            ),
+            _result(race_state=RaceState.FINISHED, winner_suit=winner),
+            shot,
+            now,
+        )
+    # Unfinished — must not appear in History neighbors.
+    store.record(
+        _decision(game_id="102", session_id="game_102", seq=1),
+        _result(),
+        shot,
+        now,
+    )
+    client = TestClient(create_app(store))
+    latest = client.get("/api/history/101").json()
+    assert latest["index"] == 2
+    assert latest["total"] == 2
+    assert latest["prev_id"] == "100"
+    assert latest["next_id"] is None
+    assert latest["latest_id"] == "101"
+    older = client.get("/api/history/100").json()
+    assert older["prev_id"] is None
+    assert older["next_id"] == "101"
+    assert client.get("/api/history/102").status_code == 404
+
+
 def test_similar_and_stats_api(tmp_path: Path):
     client = _client(tmp_path)
     stats = client.get("/api/stats").json()

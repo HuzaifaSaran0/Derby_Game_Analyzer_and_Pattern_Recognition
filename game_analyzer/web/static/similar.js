@@ -40,14 +40,22 @@
       kindBanner.textContent = "";
       return;
     }
+    const sharedMin = data.near_shared_min != null ? data.near_shared_min : 9;
+    const nearNote =
+      "near = ≥" +
+      sharedMin +
+      "/12 handicap · browse only (not a bet signal)";
     // One page-level line (not repeated per set).
     if (data.exact_n > 0 && data.near_n > 0) {
       kindBanner.textContent =
         "EXACT + NEAR · " +
         data.exact_n +
-        " exact set(s), " +
-        data.near_n +
-        " near set(s) · near = ≥8/12 handicap cards shared";
+        " exact · " +
+        (data.near_same_n || 0) +
+        " near same-winner · " +
+        (data.near_mixed_n || 0) +
+        " near mixed · " +
+        nearNote;
       kindBanner.className = "similar-kind-banner is-mixed";
     } else if (data.exact_n > 0) {
       kindBanner.textContent =
@@ -55,7 +63,12 @@
       kindBanner.className = "similar-kind-banner is-exact";
     } else {
       kindBanner.textContent =
-        "NEAR handicap · no exact twins · closest pairs with ≥8/12 cards shared";
+        "NEAR only · no exact twins · " +
+        (data.near_same_n || 0) +
+        " same-winner · " +
+        (data.near_mixed_n || 0) +
+        " mixed · " +
+        nearNote;
       kindBanner.className = "similar-kind-banner is-near";
     }
     kindBanner.hidden = false;
@@ -74,17 +87,21 @@
 
   function renderCluster(cluster, index) {
     const setNum = index + 1;
-    const exactCls = cluster.exact ? " exact" : " near";
+    const badgeKind = cluster.badge_kind || (cluster.exact ? "exact" : "near");
+    const badge =
+      cluster.badge ||
+      (cluster.exact
+        ? "EXACT"
+        : cluster.winners_same
+          ? "NEAR · same winners"
+          : cluster.winners_same === false
+            ? "NEAR · mixed winners · browse only"
+            : "NEAR · browse only");
     const winnerBits = (cluster.winner_counts || [])
       .map(function (w) {
         return w[0] + "×" + w[1];
       })
       .join(" · ");
-    const sameNote = cluster.winners_same
-      ? " (same winners)"
-      : cluster.winners_same === false
-        ? " (mixed winners)"
-        : "";
 
     let gamesHtml = '<div class="similar-games-row">';
     (cluster.games || []).forEach(function (game) {
@@ -96,17 +113,20 @@
     const hostId = "shots-set-" + setNum + "-" + ids.join("-");
 
     return (
-      '<article class="similar-cluster panel' +
-      exactCls +
+      '<article class="similar-cluster panel is-' +
+      badgeKind +
       '" data-set="' +
       setNum +
-      '"><h3 class="cluster-set">Set ' +
+      '"><div class="cluster-head"><span class="sim-badge ' +
+      badgeKind +
+      '">' +
+      badge +
+      '</span><h3 class="cluster-set">Set ' +
       setNum +
-      '</h3><p class="cluster-detail">' +
+      '</h3></div><p class="cluster-detail">' +
       clusterDetail(cluster) +
       '</p><p class="cluster-winners">Winners: ' +
       (winnerBits || "—") +
-      sameNote +
       "</p>" +
       gamesHtml +
       '<div class="similar-actions"><button type="button" class="btn btn-sm" data-show-shots="' +

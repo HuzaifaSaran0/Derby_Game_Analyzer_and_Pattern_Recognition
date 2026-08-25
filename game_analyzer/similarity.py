@@ -9,9 +9,11 @@ from enum import Enum
 from game_analyzer.confidence import ConfidenceLevel, ConfidenceResult, level_at_least
 from game_analyzer.race_values import CARDS_PER_DRAW_ROUND, suits_match
 
-# Near = meaningful overlap. With 12 handicap cards, 8 shared → Jaccard 8/16 = 0.50.
-# Exact (12/12) stays primary for live twin notify; near is for browsing.
-NEAR_JACCARD_MIN = 0.50
+# Near = stronger overlap for browsing (not a bet signal).
+# With 12 handicap cards, 9 shared → Jaccard 9/15 = 0.60.
+# Exact (12/12) stays primary for live twin notify.
+NEAR_JACCARD_MIN = 0.60
+NEAR_SHARED_MIN = 9  # implied by Jaccard on 12-card handicaps; used in UI copy
 LIVE_MIN_MATCHES = 2
 LIVE_AGREE_MIN = 0.80
 CLOSEST_PAIR_LIMIT = 40
@@ -398,6 +400,8 @@ def build_clusters(
     clusters.sort(
         key=lambda c: (
             not c.exact,
+            # Among near sets: same-winner first (still browse-only, clearer signal).
+            0 if c.exact else (0 if c.winners_same else 1),
             stage_order.get(c.stage, 9),
             -c.match_pct,
             -c.size,
@@ -480,8 +484,30 @@ def evaluate_live_twin(
     return None
 
 
+def cluster_kind_badge(cluster: SimilarityCluster) -> str:
+    """Short client-facing badge: exact vs near (same / mixed winners)."""
+    if cluster.exact:
+        return "EXACT"
+    if cluster.winners_same:
+        return "NEAR · same winners"
+    if cluster.winners_same is False:
+        return "NEAR · mixed winners · browse only"
+    return "NEAR · browse only"
+
+
+def cluster_badge_kind(cluster: SimilarityCluster) -> str:
+    """CSS/UI class key for a cluster badge."""
+    if cluster.exact:
+        return "exact"
+    if cluster.winners_same:
+        return "near-same"
+    if cluster.winners_same is False:
+        return "near-mixed"
+    return "near"
+
+
 def format_cluster_headline(cluster: SimilarityCluster) -> str:
-    kind = "EXACT" if cluster.exact else "NEAR"
+    badge = cluster_kind_badge(cluster)
     winner_note = "winners mixed"
     if cluster.winners_same and cluster.majority_winner:
         winner_note = f"all won {cluster.majority_winner}"
@@ -493,6 +519,6 @@ def format_cluster_headline(cluster: SimilarityCluster) -> str:
     if not cluster.exact and cluster.key.startswith("near:") and "shared=" in cluster.key:
         shared_note = f" · {cluster.key.rsplit('shared=', 1)[-1]}/12 cards shared"
     return (
-        f"{kind} {cluster.stage.value} · {cluster.match_pct:.0f}% · "
+        f"{badge} · {cluster.stage.value} · {cluster.match_pct:.0f}% · "
         f"{cluster.size} games · {winner_note}{shared_note}"
     )
