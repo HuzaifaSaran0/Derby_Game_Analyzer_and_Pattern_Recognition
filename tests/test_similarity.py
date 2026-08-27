@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from game_analyzer.confidence import ConfidenceLevel, ConfidenceResult, evaluate_confidence
 from game_analyzer.models import ExtractionResult, GamePhase, RaceState, Suit
 from game_analyzer.session import SessionDecision
 from game_analyzer.similarity import (
@@ -129,7 +128,7 @@ def test_clusters_exact_and_winner_agreement():
     assert exact_r2[0].agreement_pct == round(100 * 2 / 3, 1)
 
 
-def test_live_twin_requires_agreement_and_checks_confidence():
+def test_live_twin_requires_agreement():
     query = build_fingerprint("live", HANDICAP_A, R1 + R2)
     twins = [
         fp
@@ -142,39 +141,31 @@ def test_live_twin_requires_agreement_and_checks_confidence():
     ]
     assert query
 
-    signal = evaluate_live_twin(query, twins, confidence=None)
+    signal = evaluate_live_twin(query, twins)
     assert signal is not None
     assert signal.suggested_winner == "Spades"
-    assert signal.confidence_agrees is None
-
-    conf = evaluate_confidence(HANDICAP_A, R1 + R2, pick="Spades", simulations=200, seed=1)
-    if conf.ready and conf.level in {ConfidenceLevel.HIGH, ConfidenceLevel.VERY_HIGH}:
-        ok = evaluate_live_twin(query, twins, confidence=conf)
-        assert ok is not None
-        assert ok.confidence_agrees is True
-
-    conflict = ConfidenceResult(
-        level=ConfidenceLevel.HIGH,
-        pick="Hearts",
-        track_leader="Hearts",
-        track_gap=5,
-        pick_on_track_leader=True,
-        mc_probs={"Hearts": 0.9, "Spades": 0.05, "Clubs": 0.03, "Diamonds": 0.02},
-        mc_pick=0.9,
-        mc_margin=0.85,
-        rivals_weak_count=3,
-        draw_rounds=2,
-        reasons=("test conflict",),
-        confidence_pct=90,
-    )
-    assert evaluate_live_twin(query, twins, confidence=conflict) is None
 
 
 def test_live_twin_needs_min_matches():
     query = build_fingerprint("live", HANDICAP_A, ())
     alone = [fp for fp in (build_fingerprint("1", HANDICAP_A, (), winner_suit="Spades"),) if fp]
     assert query
-    assert evaluate_live_twin(query, alone, confidence=None) is None
+    assert evaluate_live_twin(query, alone) is None
+
+
+def test_live_twin_rejects_low_agreement():
+    query = build_fingerprint("live", HANDICAP_A, R1 + R2)
+    mixed = [
+        fp
+        for fp in (
+            build_fingerprint("1", HANDICAP_A, R1 + R2, winner_suit="Spades"),
+            build_fingerprint("2", HANDICAP_A, R1 + R2, winner_suit="Hearts"),
+        )
+        if fp is not None
+    ]
+    assert query
+    # 50% agreement < LIVE_AGREE_MIN (0.80)
+    assert evaluate_live_twin(query, mixed) is None
 
 
 def test_store_similarity_apis(tmp_path: Path):
@@ -218,7 +209,7 @@ def test_store_similarity_apis(tmp_path: Path):
     assert any(c.exact and c.size >= 2 for c in clusters)
     hits = store.find_similar_to("10")
     assert any(h.other.game_id == "11" and h.exact for h in hits)
-    signal = store.live_twin_signal(HANDICAP_A, R1 + R2, confidence=None, exclude_game_id="99")
+    signal = store.live_twin_signal(HANDICAP_A, R1 + R2, exclude_game_id="99")
     assert signal is not None
     assert signal.suggested_winner == "Spades"
 

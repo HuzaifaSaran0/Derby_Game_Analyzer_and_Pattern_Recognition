@@ -185,11 +185,7 @@
 
   function updateStatus(alerts) {
     if (!status) return;
-    if (alerts && alerts.enabled === false) {
-      status.textContent = "Alerts off in config";
-      return;
-    }
-    status.textContent = "Latest 5";
+    status.textContent = "Latest 5 · similarity";
   }
 
   function setOpen(next) {

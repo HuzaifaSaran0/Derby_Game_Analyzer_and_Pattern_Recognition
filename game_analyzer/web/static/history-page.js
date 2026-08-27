@@ -26,23 +26,9 @@
   }
 
   function setStats(stats) {
-    if (!stats) return;
-    const g = document.querySelector("[data-guess-stats]");
-    const c = document.querySelector("[data-confidence-stats]");
-    if (g) {
-      const guess = stats.guess || {};
-      g.textContent =
-        guess.total > 0
-          ? "Acc " + guess.correct + "/" + guess.total + " (" + Math.round(guess.percent) + "%)"
-          : "Acc —";
-    }
-    if (c) {
-      const raw = stats.confidence_text || "";
-      c.textContent = raw
-        .replace(/Confidence accuracy\s*·\s*/i, "")
-        .replace(/VERY_HIGH/g, "VH")
-        .replace(/HIGH/g, "H");
-    }
+    const el = document.querySelector("[data-sim-stats]");
+    if (!el || !stats) return;
+    el.textContent = stats.late_round_text || "R3 twins —";
   }
 
   function openLightbox(frames, index) {
@@ -154,9 +140,6 @@
     shotCount = data.shot_count || (data.frames && data.frames.length) || 0;
     document.querySelector("[data-game-pos]").textContent = data.index + " / " + data.total;
     document.querySelector("[data-winner]").textContent = data.winner;
-    document.querySelector("[data-guess]").textContent = data.guess_text;
-    document.querySelector("[data-conf-r2]").textContent = data.confidence_r2;
-    document.querySelector("[data-conf-r3]").textContent = data.confidence_r3;
     document.querySelector("[data-game-meta]").textContent =
       "Started " +
       data.started_at +
@@ -179,7 +162,6 @@
       id: data.game_id,
       winner: data.winner,
       shot_count: data.shot_count,
-      guess: data.guess_text,
       index: data.index,
       total: data.total,
       prev_id: data.prev_id || null,
@@ -265,7 +247,6 @@
           live.stamp(true, "no finished games");
           document.querySelector("[data-game-pos]").textContent = "—";
           document.querySelector("[data-winner]").textContent = "none yet";
-          document.querySelector("[data-guess]").textContent = "—";
           return;
         }
         gameId = games[0].game_id;

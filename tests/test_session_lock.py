@@ -1,7 +1,6 @@
 from datetime import datetime
 
 from game_analyzer.models import ExtractionResult, RaceState, Suit
-from game_analyzer.race_values import race_guess
 from game_analyzer.session import GameSessionTracker
 
 HANDICAP = (("AS", "KS", "QS"), ("2H", "3H", "4H"), ("6C", "8C", "9C"), ("10D", "JD", "QD"))
@@ -23,109 +22,57 @@ def _result(**kwargs) -> ExtractionResult:
     return ExtractionResult(**defaults)
 
 
-def test_locks_guess_after_two_draw_rounds():
+def test_accumulates_draw_rounds_without_guess_lock():
     tracker = GameSessionTracker()
     now = datetime(2026, 8, 22, 12, 0, 0)
 
     tracker.observe(_result(handicap_cards=HANDICAP), now, game_id="100")
-    decision = tracker.observe(
-        _result(draw_cards=ROUND1),
-        now,
-        game_id="100",
-    )
+    decision = tracker.observe(_result(draw_cards=ROUND1), now, game_id="100")
     assert decision.locked_guess is None
+    assert decision.drawn_cards == ROUND1
 
-    decision = tracker.observe(
-        _result(draw_cards=ROUND2),
-        now,
-        game_id="100",
-    )
-    assert decision.locked_guess == race_guess(HANDICAP, SIX_DRAWS)
-    assert decision.locked_guess_draws == SIX_DRAWS
-    assert decision.locked_guess_rounds == 2
+    decision = tracker.observe(_result(draw_cards=ROUND2), now, game_id="100")
+    assert decision.locked_guess is None
+    assert decision.drawn_cards == SIX_DRAWS
+    assert decision.should_save is True
 
 
-def test_finished_frame_upgrades_to_third_round_when_available():
+def test_finished_frame_ingests_final_round_cards():
     tracker = GameSessionTracker()
     now = datetime(2026, 8, 22, 12, 0, 0)
-    nine = SIX_DRAWS + ("2H", "3D", "4C")
+    nine = SIX_DRAWS + ("2S", "3D", "4C")
 
     tracker.observe(_result(handicap_cards=HANDICAP), now, game_id="200")
     tracker.observe(_result(draw_cards=ROUND1), now, game_id="200")
-    mid = tracker.observe(_result(draw_cards=ROUND2), now, game_id="200")
-    locked = mid.locked_guess
-    assert locked is not None
+    tracker.observe(_result(draw_cards=ROUND2), now, game_id="200")
 
     finished = tracker.observe(
         _result(
             race_state=RaceState.FINISHED,
             winner_suit=Suit.HEARTS,
-            draw_cards=("2H", "3D", "4C"),
+            draw_cards=("2S", "3D", "4C"),
         ),
         now,
         game_id="200",
     )
-    assert finished.locked_guess == locked
-    assert finished.locked_guess_draws == nine
-    assert finished.locked_guess_rounds == 3
+    assert finished.phase.value == "FINISHED"
     assert finished.drawn_cards == nine
+    assert finished.locked_guess is None
 
 
-def test_finished_frame_completes_second_round_and_locks():
-    """When round 2 only appears on the winner screen, still lock from those cards."""
+def test_finished_frame_completes_second_round_draws():
     tracker = GameSessionTracker()
     now = datetime(2026, 8, 22, 12, 0, 0)
 
     tracker.observe(_result(handicap_cards=HANDICAP), now, game_id="210")
     tracker.observe(_result(draw_cards=ROUND1), now, game_id="210")
-    assert tracker.locked_guess is None
-
     finished = tracker.observe(
         _result(
             race_state=RaceState.FINISHED,
-            winner_suit=Suit.CLUBS,
+            winner_suit=Suit.SPADES,
             draw_cards=ROUND2,
         ),
         now,
         game_id="210",
     )
-    assert finished.locked_guess == race_guess(HANDICAP, SIX_DRAWS)
-    assert finished.locked_guess_draws == SIX_DRAWS
-    assert finished.locked_guess_rounds == 2
     assert finished.drawn_cards == SIX_DRAWS
-
-
-def test_finished_partial_second_round_still_cannot_lock():
-    """Winner overlay often hides a card — fewer than 6 draws still means no guess."""
-    tracker = GameSessionTracker()
-    now = datetime(2026, 8, 22, 12, 0, 0)
-
-    tracker.observe(_result(handicap_cards=HANDICAP), now, game_id="220")
-    tracker.observe(_result(draw_cards=ROUND1), now, game_id="220")
-    finished = tracker.observe(
-        _result(
-            race_state=RaceState.FINISHED,
-            winner_suit=Suit.CLUBS,
-            draw_cards=("JC", "QC"),
-        ),
-        now,
-        game_id="220",
-    )
-    assert finished.locked_guess is None
-    assert finished.drawn_cards == ROUND1 + ("JC", "QC")
-
-
-def test_third_round_upgrades_lock_before_finished():
-    tracker = GameSessionTracker()
-    now = datetime(2026, 8, 22, 12, 0, 0)
-    round3 = ("2C", "9H", "5S")
-    nine = SIX_DRAWS + round3
-
-    tracker.observe(_result(handicap_cards=HANDICAP), now, game_id="300")
-    tracker.observe(_result(draw_cards=ROUND1), now, game_id="300")
-    tracker.observe(_result(draw_cards=ROUND2), now, game_id="300")
-    decision = tracker.observe(_result(draw_cards=round3), now, game_id="300")
-
-    assert decision.locked_guess_rounds == 3
-    assert decision.locked_guess_draws == nine
-    assert decision.locked_guess == race_guess(HANDICAP, nine)

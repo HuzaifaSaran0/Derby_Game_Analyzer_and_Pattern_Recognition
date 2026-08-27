@@ -32,13 +32,8 @@
   },
   "draw_overlays": false,
   "alerts": {
-    "enabled": true,
-    "min_level": "MEDIUM",
     "webhook_url": "",
-    "log_path": "data/alerts.log",
-    "allow_upgrade": true,
-    "allow_cancel": true,
-    "mc_upgrade_delta": 0.05
+    "log_path": "data/alerts.log"
   },
   "similarity": {
     "notify": true,

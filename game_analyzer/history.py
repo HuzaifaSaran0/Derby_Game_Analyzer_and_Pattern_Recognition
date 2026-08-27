@@ -5,8 +5,6 @@ from pathlib import Path
 import customtkinter as ctk
 from PIL import Image
 
-from game_analyzer.confidence_stats import format_round_snapshot
-from game_analyzer.race_values import pre_race_outcome
 from game_analyzer.store import GameStore
 
 THUMB = (280, 168)
@@ -41,21 +39,9 @@ class HistoryWindow(ctk.CTkToplevel):
             info, text="Winner: —", font=("Segoe UI", 18, "bold"), anchor="w"
         )
         self.winner_label.pack(fill="x", padx=12, pady=(10, 2))
-        self.guess_label = ctk.CTkLabel(
-            info, text="Guess: —", font=("Segoe UI", 16), anchor="w"
-        )
-        self.guess_label.pack(fill="x", padx=12, pady=(0, 2))
-        self.conf_r2_label = ctk.CTkLabel(
-            info, text="R2 confidence: —", font=("Consolas", 13), anchor="w"
-        )
-        self.conf_r2_label.pack(fill="x", padx=12, pady=(0, 2))
-        self.conf_r3_label = ctk.CTkLabel(
-            info, text="R3 confidence: —", font=("Consolas", 13), anchor="w"
-        )
-        self.conf_r3_label.pack(fill="x", padx=12, pady=(0, 2))
         self.high_stats_label = ctk.CTkLabel(
             info,
-            text="Confidence accuracy: computing…",
+            text="Late-round similarity: computing…",
             font=("Segoe UI", 13),
             anchor="w",
             text_color="#58a6ff",
@@ -74,31 +60,34 @@ class HistoryWindow(ctk.CTkToplevel):
 
     def reload(self) -> None:
         self.game_ids = self.store.list_game_ids(finished_only=True)
-        self.high_stats_label.configure(text="Confidence accuracy: computing…")
+        self.high_stats_label.configure(text="Late-round similarity: computing…")
         if self._stats_job is not None:
             try:
                 self.after_cancel(self._stats_job)
             except Exception:
                 pass
-        self._stats_job = self.after(150, self._refresh_high_stats)
+        self._stats_job = self.after(150, self._refresh_late_stats)
         if not self.game_ids:
             self.header.configure(text="No saved games yet")
             self.winner_label.configure(text="Winner: —")
-            self.guess_label.configure(text="Guess: —")
-            self.conf_r2_label.configure(text="R2 confidence: —")
-            self.conf_r3_label.configure(text="R3 confidence: —")
             self.meta_label.configure(text="Capture a complete game first.")
             self._clear_shots()
             return
         self.index = len(self.game_ids) - 1
         self.show()
 
-    def _refresh_high_stats(self) -> None:
+    def _refresh_late_stats(self) -> None:
         self._stats_job = None
-        report = self.store.confidence_accuracy_report(simulations=200)
-        self.high_stats_label.configure(
-            text=f"Confidence accuracy  ·  {report.format_summary()}"
-        )
+        stats = self.store.late_round_stats()
+        r3 = next((s for s in stats if s.round_n == 3), None)
+        if r3 and r3.twin_sets and r3.same_winner_pct is not None:
+            text = (
+                f"Late-round similarity  ·  R3 twins {r3.twin_sets} · "
+                f"same-winner {r3.same_winner_pct:.0f}%"
+            )
+        else:
+            text = "Late-round similarity  ·  no R3 twin sets yet"
+        self.high_stats_label.configure(text=text)
 
     def prev(self) -> None:
         if not self.game_ids:
@@ -125,31 +114,8 @@ class HistoryWindow(ctk.CTkToplevel):
         self.header.configure(text=f"{self.index + 1}/{len(self.game_ids)}  Game ID {game.game_id}")
         winner = game.winner_suit.title() if game.winner_suit else "none yet"
         self.winner_label.configure(text=f"Winner: {winner}")
-        outcome = pre_race_outcome(
-            game.winner_suit,
-            game.handicap_cards,
-            game.guess_draw_cards,
-            locked_guess=game.guess_suit,
-            locked_draw_rounds=len(game.guess_draw_cards) // 3 if game.guess_draw_cards else 0,
-        )
-        self.guess_label.configure(text=self._guess_text(outcome, winner))
 
-        snap2, snap3 = self.store.confidence_snapshots_for(game_id, simulations=500)
-        self.conf_r2_label.configure(text=format_round_snapshot(snap2))
-        self.conf_r3_label.configure(text=format_round_snapshot(snap3))
-        self.conf_r2_label.configure(
-            text_color="#7ee787" if snap2.is_strong else ("#e6edf3" if snap2.ready else "#8b949e")
-        )
-        self.conf_r3_label.configure(
-            text_color="#7ee787" if snap3.is_strong else ("#e6edf3" if snap3.ready else "#8b949e")
-        )
-
-        draw_note = (
-            f"draws saved {len(game.draw_cards)} total"
-            f" · locked guess uses {len(game.guess_draw_cards)}"
-            f" ({len(game.guess_draw_cards) // 3} rounds)"
-            f" · winner-round cards are history only"
-        )
+        draw_note = f"draws saved {len(game.draw_cards)} total"
         self.meta_label.configure(
             text=f"started {game.started_at}    finished {game.finished_at or '—'}    "
             f"screenshots {len(game.frames)}    {draw_note}"
@@ -172,26 +138,3 @@ class HistoryWindow(ctk.CTkToplevel):
                 ctk.CTkLabel(cell, image=photo, text="").pack(anchor="w", pady=(4, 0))
             else:
                 ctk.CTkLabel(cell, text=f"missing file: {path.name}").pack(anchor="w")
-
-    @staticmethod
-    def _guess_text(outcome, winner_title: str) -> str:
-        if not outcome.guess_ready:
-            if outcome.draw_rounds_used:
-                return (
-                    f"Guess: — (only {outcome.draw_rounds_used}/2 draw rounds readable — "
-                    f"need 6 cards; winner screen often hides 1)"
-                )
-            return "Guess: — (no draw rounds saved yet)"
-
-        if outcome.guess is None:
-            if outcome.winner:
-                return "Guess: — (cards not fully readable)"
-            return f"Guess: — (after 2 draw rounds, waiting for winner)"
-
-        guess = outcome.guess.title()
-        rounds = outcome.draw_rounds_used or 2
-        if outcome.winner is None:
-            return f"Guess: {guess} (after {rounds} draw rounds) — waiting for winner"
-        if outcome.correct:
-            return f"Guess: {guess}  ✓ correct (winner: {winner_title})"
-        return f"Guess: {guess}  ✗ wrong (winner: {winner_title})"

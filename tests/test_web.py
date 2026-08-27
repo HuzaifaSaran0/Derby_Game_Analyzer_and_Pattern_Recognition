@@ -81,9 +81,10 @@ def test_live_page(tmp_path: Path):
     client = _client(tmp_path)
     response = client.get("/")
     assert response.status_code == 200
-    assert "Win chance" in response.text
+    assert "Card table" in response.text
     assert "/static/dashboard.js" in response.text
     assert "All games" not in response.text
+    assert "Win chance" not in response.text
 
 
 def test_home_empty(tmp_path: Path):
@@ -102,12 +103,13 @@ def test_game_page_shows_table_and_shots(tmp_path: Path):
     assert "Winner:" in response.text
     assert "Clubs" in response.text
     assert "/shot/100/1" in response.text
-    assert "♠" in response.text
+    assert "data-card-table" in response.text
     assert "data-carousel" in response.text
     assert 'id="lightbox"' in response.text
     assert "/static/game.js" in response.text
     assert "/static/live.js" in response.text
     assert "data-game-id" in response.text
+    assert "Win chance" not in response.text
     assert "/static/home.js" not in response.text
 
 
@@ -168,8 +170,8 @@ def test_history_neighbors_finished_only(tmp_path: Path):
 def test_similar_and_stats_api(tmp_path: Path):
     client = _client(tmp_path)
     stats = client.get("/api/stats").json()
-    assert "guess" in stats
-    assert "confidence_text" in stats
+    assert "finished_games" in stats
+    assert "late_round_text" in stats
     similar = client.get("/api/similar").json()
     assert "corpus_n" in similar
     assert "clusters" in similar

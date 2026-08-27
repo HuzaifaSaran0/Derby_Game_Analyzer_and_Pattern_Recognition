@@ -1,299 +1,37 @@
-from datetime import datetime
+"""Tests for similarity alert logging (late-round twin delivery)."""
+
+from __future__ import annotations
+
 from pathlib import Path
 
 from game_analyzer.alerts import (
     AlertSettings,
-    alert_settings_from_config,
-    compute_alert_transition,
-    deliver_alert,
-    format_alert_message,
+    deliver_similarity_alert,
     parse_alert_log_line,
     read_recent_alerts,
 )
-from game_analyzer.confidence import ConfidenceLevel, ConfidenceResult, evaluate_confidence, level_at_least
-from game_analyzer.models import ExtractionResult, RaceState
-from game_analyzer.session import GameSessionTracker
-
-HANDICAP = (("AS", "KS", "QS"), ("2H", "3H", "4H"), ("6C", "8C", "9C"), ("10D", "JD", "QD"))
-STRONG_R1 = ("AS", "KS", "QS")
-STRONG_R2 = ("10S", "9S", "8S")
-ROUND1 = ("5H", "7S", "AD")
-ROUND2 = ("3C", "6D", "4S")
 
 
-def _result(**kwargs) -> ExtractionResult:
-    defaults = dict(
-        race_state=RaceState.BETTING,
-        winner_suit=None,
-        high_low=None,
-        confident=False,
-        draw_cards=(),
-        handicap_cards=HANDICAP,
+def test_parse_twin_alert_extracts_link():
+    line = (
+        "2026-08-27T12:00:00+00:00  [TWIN-R3] Game 1 — 2 past game(s) match R3 draws "
+        "[9S, 8H, 7C] · winners: Diamonds×2 · link=/similar?stage=r3&ids=20,21&live=1"
     )
-    defaults.update(kwargs)
-    return ExtractionResult(**defaults)
-
-
-def test_level_at_least_helper():
-    assert level_at_least(ConfidenceLevel.HIGH, ConfidenceLevel.HIGH)
-    assert level_at_least(ConfidenceLevel.VERY_HIGH, ConfidenceLevel.HIGH)
-    assert not level_at_least(ConfidenceLevel.MEDIUM, ConfidenceLevel.HIGH)
-
-
-def test_alert_settings_default_disabled():
-    settings = alert_settings_from_config({})
-    assert settings.enabled is False
-    assert settings.min_level is ConfidenceLevel.MEDIUM
-
-
-def test_compute_bet_transition_when_qualifying():
-    confidence = evaluate_confidence(
-        HANDICAP,
-        STRONG_R1 + STRONG_R2,
-        pick="Spades",
-        simulations=200,
-        seed=1,
-    )
-    assert confidence.level in {ConfidenceLevel.HIGH, ConfidenceLevel.VERY_HIGH}
-    transition = compute_alert_transition(
-        settings=AlertSettings(enabled=True),
-        previously_sent=False,
-        previous_level=None,
-        previous_mc_pick=None,
-        previous_pick=None,
-        confidence=confidence,
-        game_id="42",
-    )
-    assert transition.fired
-    assert transition.kind == "bet"
-    assert "Game 42" in (transition.message or "")
-
-
-def test_compute_no_duplicate_when_still_high():
-    confidence = evaluate_confidence(
-        HANDICAP,
-        STRONG_R1 + STRONG_R2,
-        pick="Spades",
-        simulations=200,
-        seed=1,
-    )
-    transition = compute_alert_transition(
-        settings=AlertSettings(enabled=True),
-        previously_sent=True,
-        previous_level=confidence.level,
-        previous_mc_pick=confidence.mc_pick,
-        previous_pick=confidence.pick,
-        confidence=confidence,
-        game_id="42",
-    )
-    assert not transition.fired
-
-
-def test_compute_upgrade_transition():
-    low = ConfidenceResult(
-        level=ConfidenceLevel.MEDIUM,
-        pick="Spades",
-        track_leader="Spades",
-        track_gap=6,
-        pick_on_track_leader=True,
-        mc_probs=None,
-        mc_pick=0.5,
-        mc_margin=0.05,
-        rivals_weak_count=0,
-        draw_rounds=2,
-        reasons=("medium",),
-    )
-    high = ConfidenceResult(
-        level=ConfidenceLevel.HIGH,
-        pick="Spades",
-        track_leader="Spades",
-        track_gap=12,
-        pick_on_track_leader=True,
-        mc_probs=None,
-        mc_pick=0.7,
-        mc_margin=0.2,
-        rivals_weak_count=2,
-        draw_rounds=3,
-        reasons=("high",),
-    )
-    transition = compute_alert_transition(
-        settings=AlertSettings(enabled=True),
-        previously_sent=True,
-        previous_level=ConfidenceLevel.MEDIUM,
-        previous_mc_pick=0.5,
-        previous_pick="Spades",
-        confidence=high,
-        game_id="99",
-    )
-    assert transition.fired
-    assert transition.kind == "upgrade"
-
-
-def test_compute_cancel_transition():
-    high = ConfidenceResult(
-        level=ConfidenceLevel.HIGH,
-        pick="Spades",
-        track_leader="Spades",
-        track_gap=12,
-        pick_on_track_leader=True,
-        mc_probs=None,
-        mc_pick=0.7,
-        mc_margin=0.2,
-        rivals_weak_count=2,
-        draw_rounds=2,
-        reasons=("high",),
-    )
-    low = ConfidenceResult(
-        level=ConfidenceLevel.LOW,
-        pick="Spades",
-        track_leader="Hearts",
-        track_gap=2,
-        pick_on_track_leader=False,
-        mc_probs=None,
-        mc_pick=0.3,
-        mc_margin=0.02,
-        rivals_weak_count=0,
-        draw_rounds=3,
-        reasons=("low",),
-    )
-    transition = compute_alert_transition(
-        settings=AlertSettings(enabled=True),
-        previously_sent=True,
-        previous_level=ConfidenceLevel.HIGH,
-        previous_mc_pick=0.7,
-        previous_pick="Spades",
-        confidence=low,
-        game_id="99",
-    )
-    assert transition.fired
-    assert transition.kind == "cancel"
-
-
-def test_compute_upgrade_on_mc_increase():
-    medium = ConfidenceResult(
-        level=ConfidenceLevel.MEDIUM,
-        pick="Clubs",
-        track_leader="Clubs",
-        track_gap=8,
-        pick_on_track_leader=True,
-        mc_probs=None,
-        mc_pick=0.62,
-        mc_margin=0.08,
-        rivals_weak_count=1,
-        draw_rounds=2,
-        reasons=("medium",),
-        confidence_pct=62,
-    )
-    higher = ConfidenceResult(
-        level=ConfidenceLevel.HIGH,
-        pick="Clubs",
-        track_leader="Clubs",
-        track_gap=10,
-        pick_on_track_leader=True,
-        mc_probs=None,
-        mc_pick=0.84,
-        mc_margin=0.18,
-        rivals_weak_count=2,
-        draw_rounds=3,
-        reasons=("high",),
-        confidence_pct=84,
-    )
-    transition = compute_alert_transition(
-        settings=AlertSettings(enabled=True, min_level=ConfidenceLevel.MEDIUM),
-        previously_sent=True,
-        previous_level=ConfidenceLevel.MEDIUM,
-        previous_mc_pick=0.62,
-        previous_pick="Clubs",
-        confidence=higher,
-        game_id="55",
-    )
-    assert transition.fired
-    assert transition.kind == "upgrade"
-    assert "84%" in (transition.message or "")
-
-
-def test_session_does_not_fire_alert_when_disabled():
-    tracker = GameSessionTracker()
-    now = datetime(2026, 8, 22, 12, 0, 0)
-    tracker.observe(_result(handicap_cards=HANDICAP), now, game_id="100")
-    tracker.observe(_result(draw_cards=STRONG_R1), now, game_id="100")
-    decision = tracker.observe(_result(draw_cards=STRONG_R2), now, game_id="100")
-    assert decision.locked_guess is not None
-    assert decision.alert_fired is False
-
-
-def test_session_fires_bet_alert_when_enabled():
-    tracker = GameSessionTracker()
-    tracker.alert_settings = AlertSettings(enabled=True, min_level=ConfidenceLevel.HIGH)
-    now = datetime(2026, 8, 22, 12, 0, 0)
-    tracker.observe(_result(handicap_cards=HANDICAP), now, game_id="200")
-    tracker.observe(_result(draw_cards=STRONG_R1), now, game_id="200")
-    decision = tracker.observe(_result(draw_cards=STRONG_R2), now, game_id="200")
-    assert decision.locked_guess == "Spades"
-    assert decision.confidence_level in {"HIGH", "VERY_HIGH"}
-    assert decision.alert_fired is True
-    assert decision.alert_kind == "bet"
-    assert decision.alert_message
-
-
-def test_finished_path_never_fires_alert(tmp_path: Path):
-    tracker = GameSessionTracker()
-    tracker.alert_settings = AlertSettings(
-        enabled=True,
-        min_level=ConfidenceLevel.HIGH,
-        log_path=tmp_path / "alerts.log",
-    )
-    now = datetime(2026, 8, 22, 12, 0, 0)
-    tracker.observe(_result(handicap_cards=HANDICAP), now, game_id="300")
-    tracker.observe(_result(draw_cards=ROUND1), now, game_id="300")
-    finished = tracker.observe(
-        _result(
-            race_state=RaceState.FINISHED,
-            draw_cards=ROUND2,
-            winner_suit=None,
-        ),
-        now,
-        game_id="300",
-    )
-    assert finished.locked_guess is not None
-    assert finished.alert_fired is False
-
-
-def test_deliver_alert_writes_log(tmp_path: Path):
-    log_path = tmp_path / "alerts.log"
-    settings = AlertSettings(enabled=True, log_path=log_path)
-    deliver_alert(
-        settings,
-        alert_fired=True,
-        alert_kind="bet",
-        alert_message="[BET] test",
-    )
-    assert log_path.is_file()
-    assert "[BET] test" in log_path.read_text(encoding="utf-8")
-
-
-def test_format_alert_message_includes_pick():
-    confidence = evaluate_confidence(HANDICAP, STRONG_R1 + STRONG_R2, pick="Spades", seed=2)
-    text = format_alert_message(game_id="7", confidence=confidence, kind="bet")
-    assert "Pick Spades" in text
-    assert "Game 7" in text
-
-
-def test_read_recent_alerts_parses_log(tmp_path: Path):
-    log_path = tmp_path / "alerts.log"
-    log_path.write_text(
-        "2026-08-25T15:00:00+00:00  [BET] — Game 1 — Pick Spades\n"
-        "2026-08-25T15:01:00+00:00  WEBHOOK FAILED: boom — ignore\n"
-        "2026-08-25T15:02:00+00:00  [UPGRADE] — Game 1 — Pick Spades\n",
-        encoding="utf-8",
-    )
-    rows = read_recent_alerts(log_path, limit=5)
-    assert len(rows) == 2
-    assert rows[0]["kind"] == "upgrade"
-    assert rows[1]["kind"] == "bet"
-    parsed = parse_alert_log_line(
-        "2026-08-25T15:00:00+00:00  [BET] — Game 1 — Pick Spades"
-    )
+    parsed = parse_alert_log_line(line)
     assert parsed is not None
-    assert parsed["kind"] == "bet"
-    assert "Pick Spades" in parsed["message"]
+    assert parsed["kind"] == "twin-r3"
+    assert parsed["link"] == "/similar?stage=r3&ids=20,21&live=1"
+
+
+def test_deliver_similarity_alert_writes_log(tmp_path: Path):
+    log_path = tmp_path / "alerts.log"
+    settings = AlertSettings(log_path=log_path)
+    deliver_similarity_alert(
+        settings,
+        alert_kind="twin-r3",
+        alert_message="[TWIN-R3] Game 9 — 1 past game(s) match R3 draws · link=/similar?stage=r3&ids=1",
+    )
+    recent = read_recent_alerts(log_path, limit=5)
+    assert recent
+    assert recent[0]["kind"] == "twin-r3"
+    assert "link=" in recent[0]["message"]

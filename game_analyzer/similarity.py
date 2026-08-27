@@ -6,7 +6,6 @@ from collections import Counter
 from dataclasses import dataclass
 from enum import Enum
 
-from game_analyzer.confidence import ConfidenceLevel, ConfidenceResult, level_at_least
 from game_analyzer.race_values import CARDS_PER_DRAW_ROUND, suits_match
 
 # Near = stronger overlap for browsing (not a bet signal).
@@ -93,9 +92,6 @@ class TwinLiveSignal:
     suggested_winner: str
     match_count: int
     agreement_pct: float
-    confidence_level: str | None
-    confidence_pick: str | None
-    confidence_agrees: bool | None
     message: str
     matched_game_ids: tuple[str, ...]
 
@@ -414,10 +410,8 @@ def build_clusters(
 def evaluate_live_twin(
     query: GameFingerprint,
     corpus: list[GameFingerprint],
-    *,
-    confidence: ConfidenceResult | None = None,
 ) -> TwinLiveSignal | None:
-    """Suggest a winner from exact historical twins when agreement + confidence align."""
+    """Suggest a winner from exact historical twins when agreement is strong."""
     # Prefer deepest exact stage available.
     for stage in (MatchStage.HANDICAP_R2, MatchStage.HANDICAP_R1, MatchStage.HANDICAP):
         exact_hits = [
@@ -436,37 +430,10 @@ def evaluate_live_twin(
         if agreement < LIVE_AGREE_MIN:
             continue
 
-        conf_level = confidence.level.value if confidence and confidence.ready else None
-        conf_pick = confidence.pick.title() if confidence and confidence.pick else None
-        conf_agrees: bool | None = None
-        if conf_pick:
-            conf_agrees = suits_match(conf_pick, top)
-
-        # Gate with confidence system when a lock exists.
-        if confidence is not None and confidence.ready and conf_pick:
-            if level_at_least(confidence.level, ConfidenceLevel.HIGH):
-                if not conf_agrees:
-                    # Strong confidence conflicts with twins — do not notify a winner.
-                    continue
-            elif confidence.level is ConfidenceLevel.MEDIUM:
-                if not conf_agrees:
-                    continue
-            else:
-                # LOW / weak confidence: only allow unanimous exact twins.
-                if agreement < 0.999:
-                    continue
-
         ids = tuple(h.other.game_id for h in exact_hits)
-        conf_note = ""
-        if conf_level and conf_pick:
-            if conf_agrees:
-                conf_note = f" · confidence {conf_level} also picks {conf_pick}"
-            else:
-                conf_note = f" · confidence {conf_level} picks {conf_pick}"
         message = (
             f"Twin match ({stage.value} exact): possible winner {top} "
             f"({top_n}/{len(winners)} = {agreement:.0%} agree, {len(exact_hits)} games)"
-            f"{conf_note}"
         )
         return TwinLiveSignal(
             stage=stage,
@@ -475,9 +442,6 @@ def evaluate_live_twin(
             suggested_winner=top,
             match_count=len(exact_hits),
             agreement_pct=round(agreement * 100.0, 1),
-            confidence_level=conf_level,
-            confidence_pick=conf_pick,
-            confidence_agrees=conf_agrees,
             message=message,
             matched_game_ids=ids,
         )

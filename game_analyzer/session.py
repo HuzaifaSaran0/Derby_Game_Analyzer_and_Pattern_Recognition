@@ -4,13 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
-from game_analyzer.alerts import AlertSettings, compute_alert_transition
-from game_analyzer.confidence import ConfidenceLevel, evaluate_confidence
 from game_analyzer.models import ExtractionResult, GamePhase, merge_suit_cards
-from game_analyzer.race_values import (
-    CARDS_PER_DRAW_ROUND,
-    lock_guess,
-)
 
 
 class WaitMode(str, Enum):
@@ -60,6 +54,7 @@ class SessionDecision:
     wait_from_live_timer: bool = False
     table_cards: tuple[tuple[str, tuple[str, ...]], ...] = ()
     drawn_cards: tuple[str, ...] = ()
+    # Legacy guess/confidence fields kept as unused stubs for older callers/tests.
     locked_guess: str | None = None
     locked_guess_draws: tuple[str, ...] = ()
     locked_guess_rounds: int = 0
@@ -97,111 +92,6 @@ class GameSessionTracker:
         self._ever_observed: bool = False
         self.handicap_cards: tuple[tuple[str, ...], ...] = ()
         self.drawn_cards: list[str] = []
-        self.locked_guess: str | None = None
-        self.locked_guess_draws: tuple[str, ...] = ()
-        self.locked_guess_rounds: int = 0
-        self.alert_settings = AlertSettings()
-        self._confidence_level: ConfidenceLevel | None = None
-        self._confidence_reasons: tuple[str, ...] = ()
-        self._confidence_pct: int | None = None
-        self._alert_sent = False
-        self._last_alert_level: ConfidenceLevel | None = None
-        self._last_mc_pick: float | None = None
-        self._last_alert_pick: str | None = None
-        self._alert_fired_this_decision = False
-        self._alert_kind: str | None = None
-        self._alert_message: str | None = None
-
-    def _clear_alert_decision(self) -> None:
-        self._alert_fired_this_decision = False
-        self._alert_kind = None
-        self._alert_message = None
-
-    def _reset_alert_state(self) -> None:
-        self._alert_sent = False
-        self._last_alert_level = None
-        self._last_mc_pick = None
-        self._last_alert_pick = None
-        self._confidence_level = None
-        self._confidence_reasons = ()
-        self._confidence_pct = None
-
-    def _lock_fields(self) -> dict[str, object]:
-        return {
-            "locked_guess": self.locked_guess,
-            "locked_guess_draws": self.locked_guess_draws,
-            "locked_guess_rounds": self.locked_guess_rounds,
-        }
-
-    def _decision_fields(self) -> dict[str, object]:
-        return {
-            **self._lock_fields(),
-            "confidence_level": (
-                self._confidence_level.value if self._confidence_level else None
-            ),
-            "confidence_reasons": self._confidence_reasons,
-            "confidence_pct": self._confidence_pct,
-            "alert_fired": self._alert_fired_this_decision,
-            "alert_kind": self._alert_kind,
-            "alert_message": self._alert_message,
-        }
-
-    def _update_locked_guess(self) -> bool:
-        """Freeze or upgrade the official guess from draw cards only — never from winner OCR."""
-        if not self.handicap_cards:
-            return False
-        drawn = tuple(self.drawn_cards)
-        locked = lock_guess(self.handicap_cards, drawn)
-        if locked is None:
-            return False
-        changed = (
-            locked.draw_rounds > self.locked_guess_rounds
-            or (
-                self.locked_guess is not None
-                and locked.suit
-                and locked.suit.title() != self.locked_guess.title()
-            )
-        )
-        if not changed and locked.draw_rounds <= self.locked_guess_rounds:
-            return False
-        if locked.draw_rounds < self.locked_guess_rounds:
-            return False
-        self.locked_guess = locked.suit
-        self.locked_guess_draws = locked.draw_cards
-        self.locked_guess_rounds = locked.draw_rounds
-        return True
-
-    def _refresh_confidence(self, *, allow_alerts: bool, game_id: str | None) -> None:
-        if not self.handicap_cards or not self.locked_guess or not self.locked_guess_draws:
-            self._confidence_level = None
-            self._confidence_reasons = ()
-            return
-        confidence = evaluate_confidence(
-            self.handicap_cards,
-            self.locked_guess_draws,
-            pick=self.locked_guess,
-        )
-        self._confidence_level = confidence.level
-        self._confidence_reasons = confidence.reasons
-        self._confidence_pct = confidence.confidence_pct
-        if allow_alerts:
-            transition = compute_alert_transition(
-                settings=self.alert_settings,
-                previously_sent=self._alert_sent,
-                previous_level=self._last_alert_level,
-                previous_mc_pick=self._last_mc_pick,
-                previous_pick=self._last_alert_pick,
-                confidence=confidence,
-                game_id=game_id,
-            )
-            if transition.fired:
-                self._alert_fired_this_decision = True
-                self._alert_kind = transition.kind
-                self._alert_message = transition.message
-                self._alert_sent = True
-                self._last_alert_pick = confidence.pick
-        self._last_alert_level = confidence.level
-        self._last_mc_pick = confidence.mc_pick
 
     def _fingerprint(self, result: ExtractionResult) -> tuple:
         return (result.game_phase(), result.handicap_cards, result.draw_cards)
@@ -219,10 +109,6 @@ class GameSessionTracker:
         self._close_after_save = False
         self.handicap_cards = ()
         self.drawn_cards = []
-        self.locked_guess = None
-        self.locked_guess_draws = ()
-        self.locked_guess_rounds = 0
-        self._reset_alert_state()
 
     def _table_cards(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
         return merge_suit_cards(self.handicap_cards, tuple(self.drawn_cards))
@@ -255,7 +141,6 @@ class GameSessionTracker:
             peek_id_only=peek,
             table_cards=self._table_cards(),
             drawn_cards=tuple(self.drawn_cards),
-            **self._decision_fields(),
         )
 
     def _begin_game(
@@ -274,7 +159,6 @@ class GameSessionTracker:
         """Open a session for this Game ID and sync wait to the circle timer when possible."""
         t = self.timing
         self._ignored_game_id = None
-        self._reset_alert_state()
         self.session_id = self._new_session_id(captured_at, game_id)
         self.session_game_id = game_id
         # Unsaved sync shots (e.g. leftover previous result) must not consume seq 1,
@@ -307,7 +191,6 @@ class GameSessionTracker:
             wait_from_live_timer=from_timer,
             table_cards=self._table_cards(),
             drawn_cards=tuple(self.drawn_cards),
-            **self._decision_fields(),
         )
 
     def _padded_timer_wait(self, timer_seconds: int) -> float:
@@ -365,7 +248,6 @@ class GameSessionTracker:
                 self._ignored_game_id = self.session_game_id
             self._reset_session()
 
-        self._clear_alert_decision()
         phase = result.game_phase()
         captured_at = captured_at or datetime.now()
         fingerprint = self._fingerprint(result)
@@ -417,16 +299,8 @@ class GameSessionTracker:
 
         if phase == GamePhase.FINISHED:
             # Winner-screen draw cards are often the only copy of the deciding round
-            # (IN_PLAY for that round is frequently missed). Ingest them first so a
-            # second/third round can complete or refine the lock — still card math only,
-            # never winner OCR.
+            # (IN_PLAY for that round is frequently missed). Ingest them for similarity.
             self._ingest_cards(result)
-            self._update_locked_guess()
-            self._refresh_confidence(
-                allow_alerts=False,
-                game_id=game_id or self.session_game_id,
-            )
-            lock_snapshot = self._decision_fields()
             self._last_fingerprint = fingerprint
             self.seq += 1
             self._close_after_save = True
@@ -442,7 +316,6 @@ class GameSessionTracker:
                 game_id=game_id or self.session_game_id,
                 table_cards=self._table_cards(),
                 drawn_cards=tuple(self.drawn_cards),
-                **lock_snapshot,
             )
 
         if phase == GamePhase.START:
@@ -460,7 +333,6 @@ class GameSessionTracker:
                 wait_from_live_timer=from_timer,
                 table_cards=self._table_cards(),
                 drawn_cards=tuple(self.drawn_cards),
-                **self._decision_fields(),
             )
 
         if fingerprint == self._last_fingerprint:
@@ -476,15 +348,9 @@ class GameSessionTracker:
                 game_id=game_id or self.session_game_id,
                 table_cards=self._table_cards(),
                 drawn_cards=tuple(self.drawn_cards),
-                **self._decision_fields(),
             )
 
         self._ingest_cards(result)
-        upgraded = self._update_locked_guess()
-        self._refresh_confidence(
-            allow_alerts=upgraded and phase == GamePhase.IN_PLAY,
-            game_id=game_id or self.session_game_id,
-        )
         self._last_fingerprint = fingerprint
         self.seq += 1
         return SessionDecision(
@@ -500,5 +366,4 @@ class GameSessionTracker:
             game_id=game_id or self.session_game_id,
             table_cards=self._table_cards(),
             drawn_cards=tuple(self.drawn_cards),
-            **self._decision_fields(),
         )

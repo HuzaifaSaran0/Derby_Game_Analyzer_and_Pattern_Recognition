@@ -12,9 +12,6 @@
 <section class="panel history-head">
   <p class="history-pos">{{ game.index }} / {{ game.total }}</p>
   <p class="winner-line">Winner: <strong data-winner>{{ game.winner }}</strong></p>
-  <p class="guess-line">Guess: <span data-guess>{{ game.guess_text }}</span></p>
-  <p class="conf-line" data-conf-r2>{{ game.confidence_r2 }}</p>
-  <p class="conf-line" data-conf-r3>{{ game.confidence_r3 }}</p>
   <p class="meta" data-game-meta>Started {{ game.started_at }}{% if game.finished_at %} · Finished {{ game.finished_at }}{% endif %}</p>
 </section>
 
@@ -39,19 +36,6 @@
       <div class="carousel-dots" role="tablist" aria-label="Screenshot slides"></div>
       <p class="carousel-status"></p>
     </div>
-  </section>
-
-  <section class="panel">
-    <h2 class="panel-title">Win chance</h2>
-    <div data-win-chance>
-      {% for row in game.win_chance %}
-      <div class="win-row{% if row.highlight %} highlight{% elif row.preview %} preview{% endif %}">
-        <span class="win-suit" style="color: {{ row.color }}">{{ row.symbol }} {{ row.suit }}</span>
-        <span class="win-text">{{ row.text }}</span>
-      </div>
-      {% endfor %}
-    </div>
-    <p class="win-note">{{ game.win_chance_note }}</p>
   </section>
 
   <section class="panel table-panel">

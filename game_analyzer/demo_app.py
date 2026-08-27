@@ -7,8 +7,6 @@ from PIL import Image
 
 from game_analyzer.config import load_config
 from game_analyzer.models import ExtractionResult, Suit
-from game_analyzer.alerts import alert_settings_from_config, confidence_summary_for_ui
-from game_analyzer.confidence import ConfidenceLevel, ConfidenceResult, evaluate_confidence, level_at_least
 from game_analyzer.race_values import race_snapshot, suits_match
 from game_analyzer.store import GameStore
 from game_analyzer.vision import draw_table_overlay, extract_real
@@ -47,7 +45,6 @@ class DemoApp(ctk.CTk):
         self.configure(fg_color=UI_BG)
 
         self.config_data = load_config()
-        self.alert_settings = alert_settings_from_config(self.config_data)
         root = Path(__file__).resolve().parent.parent
         self.store = GameStore(root=root)
 
@@ -99,16 +96,16 @@ class DemoApp(ctk.CTk):
         self.guess_stats.pack(fill="x", pady=(0, 2))
         self.confidence_stats = ctk.CTkLabel(
             self.header,
-            text="Confidence accuracy  ·  computing…",
+            text="Late-round similarity  ·  computing…",
             font=UI_FONT_SM,
             anchor="w",
             justify="left",
             text_color=UI_MUTED,
         )
         self.confidence_stats.pack(fill="x", pady=(0, 4))
-        self._confidence_stats_job = None
+        self._similarity_stats_job = None
         self._refresh_guess_stats()
-        self._schedule_confidence_stats()
+        self._schedule_similarity_stats()
 
         self.confidence_strip = ctk.CTkLabel(
             self.header,
@@ -235,8 +232,8 @@ class DemoApp(ctk.CTk):
         fetched_rows = ctk.CTkFrame(self.results_frame, fg_color="transparent")
         fetched_rows.pack(fill="x", padx=12, pady=(0, 10))
         self.result_state = self._result_row(fetched_rows, "Race state")
-        self.result_guess = self._result_row(fetched_rows, "Locked guess")
-        self.result_confidence = self._result_row(fetched_rows, "Confidence")
+        self.result_guess = self._result_row(fetched_rows, "Guess")
+        self.result_confidence = self._result_row(fetched_rows, "Alerts")
         self.result_winner = self._result_row(fetched_rows, "Winner (OCR)")
         self.result_phase = self._result_row(fetched_rows, "Game phase")
         self.result_session = self._result_row(fetched_rows, "Session")
@@ -424,42 +421,33 @@ class DemoApp(ctk.CTk):
         self._refresh_preview_image()
 
     def _refresh_guess_stats(self) -> None:
-        stats = self.store.pre_race_guess_accuracy()
-        if stats.total == 0:
-            self.guess_stats.configure(
-                text="Accuracy  —  no scored games yet",
-                text_color=UI_MUTED,
-            )
-        else:
-            self.guess_stats.configure(
-                text=(
-                    f"Accuracy  {stats.correct}/{stats.total}  ({stats.percent:.0f}%)"
-                    f"  ·  guess locks at 2–3 draw rounds"
-                ),
-                text_color=UI_ACCENT if stats.percent and stats.percent >= 50 else UI_WARN,
-            )
-        self._schedule_confidence_stats()
+        finished = len(self.store.list_game_ids(finished_only=True))
+        self.guess_stats.configure(
+            text=f"Finished games  {finished}" if finished else "Finished games  —"
+        )
 
-    def _schedule_confidence_stats(self) -> None:
-        if self._confidence_stats_job is not None:
+    def _schedule_similarity_stats(self) -> None:
+        if self._similarity_stats_job is not None:
             try:
-                self.after_cancel(self._confidence_stats_job)
+                self.after_cancel(self._similarity_stats_job)
             except Exception:
                 pass
-        self._confidence_stats_job = self.after(200, self._refresh_confidence_stats)
+        self._similarity_stats_job = self.after(200, self._refresh_similarity_stats)
 
-    def _refresh_confidence_stats(self) -> None:
-        self._confidence_stats_job = None
-        report = self.store.confidence_accuracy_report(simulations=200)
-        strong = max(
-            report.round2.high.percent or 0,
-            report.round2.very_high.percent or 0,
-            report.round3.high.percent or 0,
-            report.round3.very_high.percent or 0,
-        )
+    def _refresh_similarity_stats(self) -> None:
+        self._similarity_stats_job = None
+        stats = self.store.late_round_stats()
+        r3 = next((s for s in stats if s.round_n == 3), None)
+        if r3 and r3.twin_sets and r3.same_winner_pct is not None:
+            label = (
+                f"Late-round similarity  ·  R3 twins {r3.twin_sets} · "
+                f"same-winner {r3.same_winner_pct:.0f}%"
+            )
+        else:
+            label = "Late-round similarity  ·  no R3 twin sets yet"
         self.confidence_stats.configure(
-            text=f"Confidence accuracy  ·  {report.format_summary()}",
-            text_color="#7ee787" if strong >= 70 else UI_MUTED,
+            text=label,
+            text_color=UI_ACCENT,
         )
 
     def _result_row(self, parent: ctk.CTkFrame, title: str) -> ctk.CTkLabel:
@@ -486,91 +474,12 @@ class DemoApp(ctk.CTk):
         self._result_value_labels.append(value)
         return value
 
-    def _confidence_strip_style(
-        self,
-        level: ConfidenceLevel,
-        *,
-        alert_fired: bool,
-        alert_kind: str | None,
-        would_alert: bool,
-    ) -> tuple[str, str]:
-        if alert_fired and alert_kind == "cancel":
-            return UI_TEXT, "#8b3a3a"
-        if alert_fired or would_alert:
-            return "#0d1117", UI_SUCCESS
-        styles = {
-            ConfidenceLevel.NONE: (UI_MUTED, UI_PANEL),
-            ConfidenceLevel.LOW: ("#ffb86c", "#2d2218"),
-            ConfidenceLevel.MEDIUM: (UI_ACCENT, "#1a2a3d"),
-            ConfidenceLevel.HIGH: ("#7ee787", "#1a3d2a"),
-            ConfidenceLevel.VERY_HIGH: ("#aff5b4", "#1a3d2a"),
-        }
-        return styles.get(level, (UI_MUTED, UI_PANEL))
-
-    @staticmethod
-    def _compact_confidence_text(confidence: ConfidenceResult) -> str:
-        """One short line: MEDIUM 53% · Diamonds · gap +8 · MC 54%."""
-        if not confidence.ready:
-            return "need 2 rounds"
-        parts: list[str] = [confidence.level.value]
-        if confidence.confidence_pct is not None:
-            parts[0] = f"{confidence.level.value} {confidence.confidence_pct}%"
-        if confidence.pick:
-            parts.append(confidence.pick.title())
-        if confidence.track_gap is not None:
-            parts.append(f"gap +{confidence.track_gap}")
-        if confidence.mc_pick is not None:
-            parts.append(f"MC {confidence.mc_pick:.0%}")
-        return " · ".join(parts)
-
-    def _update_confidence_strip(
-        self,
-        confidence: ConfidenceResult,
-        *,
-        alert_fired: bool,
-        alert_kind: str | None,
-        alert_message: str | None,
-    ) -> None:
-        would_alert = (
-            self.alert_settings.enabled
-            and confidence.ready
-            and level_at_least(confidence.level, self.alert_settings.min_level)
-            and not alert_fired
-        )
-        core = self._compact_confidence_text(confidence)
-        if alert_fired and alert_kind:
-            label = alert_kind.upper()
-            text = f"  {label}  ·  {core}"
-        elif would_alert:
-            text = f"  BET?  ·  {core}"
-        elif not confidence.ready:
-            text = f"  —  ·  {core}"
-        else:
-            text = f"  {core}"
-            if not self.alert_settings.enabled:
-                text += "  ·  alerts off"
-        fg, bg = self._confidence_strip_style(
-            confidence.level,
-            alert_fired=alert_fired,
-            alert_kind=alert_kind,
-            would_alert=would_alert,
-        )
-        self.confidence_strip.configure(text=text, text_color=fg, fg_color=bg)
-
     def _set_results(
         self,
         result: ExtractionResult,
         table_cards=None,
         drawn_cards: tuple[str, ...] = (),
-        locked_guess: str | None = None,
-        locked_guess_draws: tuple[str, ...] = (),
-        locked_guess_rounds: int = 0,
-        confidence_level: str | None = None,
-        confidence_reasons: tuple[str, ...] = (),
-        confidence_pct: int | None = None,
-        alert_fired: bool = False,
-        alert_kind: str | None = None,
-        alert_message: str | None = None,
+        **_ignored,
     ) -> None:
         winner = result.winner_suit.value.title() if result.winner_suit else "none yet"
         state = {
@@ -580,66 +489,16 @@ class DemoApp(ctk.CTk):
             "IN_PROGRESS": "In progress",
         }.get(result.race_state.value, result.race_state.value)
         self.result_state.configure(text=state)
-        if locked_guess:
-            rounds_note = f"after {locked_guess_rounds} rounds"
-            if result.winner_suit and suits_match(locked_guess, result.winner_suit.value):
-                guess_text = f"{locked_guess.title()} ({rounds_note}) — matches winner"
-            elif result.winner_suit:
-                guess_text = f"{locked_guess.title()} ({rounds_note}) — differs from winner"
-            else:
-                guess_text = f"{locked_guess.title()} ({rounds_note})"
-            self.result_guess.configure(text=guess_text)
-        else:
-            self.result_guess.configure(text="not locked yet (need 2 draw rounds)")
-        guess_draws = locked_guess_draws if locked_guess_draws else drawn_cards
-        confidence = None
-        if result.has_handicap_cards() and guess_draws:
-            confidence = evaluate_confidence(
-                tuple(result.handicap_cards),
-                guess_draws,
-                pick=locked_guess,
-                simulations=1000,
-            )
-            if confidence_level:
-                confidence = ConfidenceResult(
-                    level=ConfidenceLevel(confidence_level),
-                    pick=confidence.pick,
-                    track_leader=confidence.track_leader,
-                    track_gap=confidence.track_gap,
-                    pick_on_track_leader=confidence.pick_on_track_leader,
-                    mc_probs=confidence.mc_probs,
-                    mc_pick=confidence.mc_pick,
-                    mc_margin=confidence.mc_margin,
-                    rivals_weak_count=confidence.rivals_weak_count,
-                    draw_rounds=confidence.draw_rounds,
-                    reasons=confidence_reasons or confidence.reasons,
-                    confidence_pct=confidence_pct if confidence_pct is not None else confidence.confidence_pct,
-                )
-            self.result_confidence.configure(
-                text=confidence_summary_for_ui(
-                    confidence,
-                    settings=self.alert_settings,
-                    alert_fired=alert_fired,
-                    alert_kind=alert_kind,
-                )
-            )
-            self._update_confidence_strip(
-                confidence,
-                alert_fired=alert_fired,
-                alert_kind=alert_kind,
-                alert_message=alert_message,
-            )
-        else:
-            self.result_confidence.configure(text="—")
-            self.confidence_strip.configure(
-                text="  —  ·  waiting for cards",
-                text_color=UI_MUTED,
-                fg_color=UI_PANEL,
-            )
+        self.result_guess.configure(text="— (similarity alerts only)")
+        self.result_confidence.configure(text="—")
+        self.confidence_strip.configure(
+            text="  Similarity  ·  late-round twin alerts only",
+            text_color=UI_ACCENT,
+            fg_color=UI_PANEL,
+        )
         self._maybe_twin_notify(
             handicap_cards=tuple(result.handicap_cards) if result.has_handicap_cards() else (),
-            draw_cards=tuple(guess_draws) if guess_draws else (),
-            confidence=confidence,
+            draw_cards=tuple(drawn_cards) if drawn_cards else tuple(result.draw_cards or ()),
             game_id=None,
         )
         self.result_winner.configure(text=winner)
@@ -652,22 +511,13 @@ class DemoApp(ctk.CTk):
         }.get(phase.value, phase.value)
         self.result_phase.configure(text=phase_text)
         self.result_session.configure(text=self.last_session_text)
-        self._render_remaining_values(
-            result,
-            drawn_cards,
-            locked_guess=locked_guess,
-            locked_guess_draws=locked_guess_draws,
-            locked_guess_rounds=locked_guess_rounds,
-        )
+        self._render_remaining_values(result, drawn_cards)
         self._render_card_table(result, table_cards)
 
     def _render_remaining_values(
         self,
         result: ExtractionResult,
         drawn_cards: tuple[str, ...] = (),
-        locked_guess: str | None = None,
-        locked_guess_draws: tuple[str, ...] = (),
-        locked_guess_rounds: int = 0,
     ) -> None:
         if not result.has_handicap_cards():
             for label in self.remaining_rows.values():
@@ -675,11 +525,11 @@ class DemoApp(ctk.CTk):
             self.remaining_favourite.configure(text="Handicap not visible yet.")
             return
 
-        guess_draws = locked_guess_draws if locked_guess_draws else drawn_cards
+        guess_draws = drawn_cards
         snap = race_snapshot(result.handicap_cards, guess_draws)
-        favourite = locked_guess if locked_guess else (snap.guess if snap.guess_ready else None)
+        favourite = snap.guess if snap.guess_ready else None
         preview = snap.preview
-        rounds_label = locked_guess_rounds or snap.draw_rounds_used
+        rounds_label = snap.draw_rounds_used
 
         def pct(value: float | None) -> str:
             return f"{value * 100:.0f}%" if value is not None else "?"
@@ -724,7 +574,7 @@ class DemoApp(ctk.CTk):
                 tw, fw, cw, sw = (int(w * 100) for w in snap.layer4_weights)
                 self.remaining_favourite.configure(
                     text=(
-                        f"Locked guess: {favourite} after {rounds_label} rounds "
+                        f"Track leader: {favourite} after {rounds_label} rounds "
                         f"({tw}% track + {fw}% future + {cw}% combo + {sw}% pool) — "
                         f"independent of winner row"
                     ),
@@ -855,7 +705,6 @@ class DemoApp(ctk.CTk):
         *,
         handicap_cards,
         draw_cards: tuple[str, ...],
-        confidence: ConfidenceResult | None,
         game_id: str | None,
     ) -> None:
         if not handicap_cards:
@@ -866,7 +715,6 @@ class DemoApp(ctk.CTk):
         signal = self.store.live_twin_signal(
             handicap_cards,
             draw_cards,
-            confidence=confidence,
             exclude_game_id=game_id,
         )
         if signal is None:
@@ -891,6 +739,7 @@ class DemoApp(ctk.CTk):
             urgency="critical",
         )
         self._set_twin_toast(visible=True, text=signal.message)
+
 
     def start_loop(self) -> None:
         if self.looping:
@@ -951,15 +800,6 @@ class DemoApp(ctk.CTk):
                 rel,
                 table_cards=decision.table_cards,
                 drawn_cards=decision.drawn_cards,
-                locked_guess=decision.locked_guess,
-                locked_guess_draws=decision.locked_guess_draws,
-                locked_guess_rounds=decision.locked_guess_rounds,
-                confidence_level=decision.confidence_level,
-                confidence_reasons=decision.confidence_reasons,
-                confidence_pct=decision.confidence_pct,
-                alert_fired=decision.alert_fired,
-                alert_kind=decision.alert_kind,
-                alert_message=decision.alert_message,
             )
         else:
             self.result_session.configure(text=self.last_session_text)
@@ -972,15 +812,6 @@ class DemoApp(ctk.CTk):
         label: str,
         table_cards=None,
         drawn_cards: tuple[str, ...] = (),
-        locked_guess: str | None = None,
-        locked_guess_draws: tuple[str, ...] = (),
-        locked_guess_rounds: int = 0,
-        confidence_level: str | None = None,
-        confidence_reasons: tuple[str, ...] = (),
-        confidence_pct: int | None = None,
-        alert_fired: bool = False,
-        alert_kind: str | None = None,
-        alert_message: str | None = None,
     ) -> None:
         self._show_live_workspace()
         result = extract_real(frame, self.config_data)
@@ -998,15 +829,6 @@ class DemoApp(ctk.CTk):
             result,
             table_cards,
             drawn_cards,
-            locked_guess=locked_guess,
-            locked_guess_draws=locked_guess_draws,
-            locked_guess_rounds=locked_guess_rounds,
-            confidence_level=confidence_level,
-            confidence_reasons=confidence_reasons,
-            confidence_pct=confidence_pct,
-            alert_fired=alert_fired,
-            alert_kind=alert_kind,
-            alert_message=alert_message,
         )
 
         winner = result.winner_suit.value if result.winner_suit else "none"

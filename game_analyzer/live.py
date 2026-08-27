@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from game_analyzer.alerts import alert_settings_from_config, deliver_alert, deliver_similarity_alert
+from game_analyzer.alerts import alert_settings_from_config, deliver_similarity_alert
 from game_analyzer.capture import grab_frame, list_brave_tabs, list_monitors, read_page_game_id, read_page_timer
 from game_analyzer.config import load_config
 from game_analyzer.round_sync import (
@@ -77,7 +77,7 @@ def _should_dual_retry(saved) -> bool:
 def _maybe_late_round_alerts(config: dict, decision: SessionDecision) -> None:
     """Alert when R3/R4/R5 draw cards exactly match past games (cascade).
 
-    Does not affect confidence alerts or handicap twin logic.
+    Independent of handicap twin browsing.
     """
     global _LATE_ROUND_GAME_ID, _LATE_ROUND_ALERTED, _LAST_LATE_SIGNALS
     sim = config.get("similarity") or {}
@@ -136,7 +136,6 @@ def capture_once(config: dict | None = None):
     _CAPTURE_STARTED_AT = time.monotonic()
     config = config or load_config()
     SESSION_TRACKER.timing = _timing_from_config(config)
-    SESSION_TRACKER.alert_settings = alert_settings_from_config(config)
     capture = config["capture"]
     game_id = read_page_game_id(capture)
 
@@ -163,13 +162,6 @@ def capture_once(config: dict | None = None):
         game_id=game_id,
         timer_seconds=timer_seconds,
     )
-    if decision.alert_fired:
-        deliver_alert(
-            SESSION_TRACKER.alert_settings,
-            alert_fired=decision.alert_fired,
-            alert_kind=decision.alert_kind,
-            alert_message=decision.alert_message,
-        )
     folder = LIVE_DIR / decision.folder_name()
     folder.mkdir(parents=True, exist_ok=True)
     stem = decision.file_stem(captured_at)
@@ -346,7 +338,7 @@ def _print_capture(saved, config: dict) -> None:
         f"wait={wait_label}/{decision.next_wait_seconds:.0f}s  trigger={trigger}  "
         f"timer={_format_timer(timer)}  "
         f"winner={winner}  draw=[{cards}]  "
-        f"conf={decision.confidence_level or '-'}  "
+        f"conf=-  "
         f"alert={decision.alert_kind or '-'}  "
         f"[{result.notes if result else ''}]"
     )
