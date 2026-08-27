@@ -346,3 +346,91 @@ def test_similarity_corpus_rebuilds_short_draws_json_from_frames(tmp_path: Path)
     fp = next(f for f in store.similarity_corpus() if f.game_id == "50")
     assert len(fp.draw_cards) == 6
     assert set(fp.draw_cards) == set(R1 + R2)
+
+
+def test_late_round_cascade_and_stats():
+    from game_analyzer.similarity import (
+        draw_round_cards,
+        evaluate_late_round_cascade,
+        late_round_corpus_stats,
+    )
+
+    R3 = ("9S", "8H", "7C")
+    R4 = ("6S", "5H", "4C")
+    R5 = ("3S", "2H", "AC")
+    other_r3 = ("9S", "8H", "7D")  # different R3
+    draws_a = R1 + R2 + R3 + R4 + R5
+    draws_b = R1 + ("3C", "6D", "5S") + R3 + R4 + ("KS", "QH", "JD")
+    draws_c = R1 + R2 + R3 + ("AS", "KH", "QD")  # R3 match only
+    draws_d = R1 + R2 + other_r3 + R4
+
+    corpus = [
+        fp
+        for fp in (
+            build_fingerprint("a", HANDICAP_A, draws_a, winner_suit="Spades"),
+            build_fingerprint("b", HANDICAP_B, draws_b, winner_suit="Spades"),
+            build_fingerprint("c", HANDICAP_NEAR, draws_c, winner_suit="Hearts"),
+            build_fingerprint("d", HANDICAP_WEAK, draws_d, winner_suit="Clubs"),
+        )
+        if fp is not None
+    ]
+    assert draw_round_cards(draws_a, 3) == R3
+
+    live = R1 + R2 + R3 + R4 + R5
+    signals = evaluate_late_round_cascade(live, corpus, live_game_id="live")
+    assert 3 in signals and 4 in signals
+    assert set(signals[3].matched_game_ids) == {"a", "b", "c"}
+    assert set(signals[4].matched_game_ids) == {"a", "b"}
+    # R5 only a matches within R4 pool
+    assert 5 in signals
+    assert signals[5].matched_game_ids == ("a",)
+    assert "link=/similar?stage=r3" in signals[3].message
+
+    stats = late_round_corpus_stats(corpus)
+    by_stage = {s.stage: s for s in stats}
+    assert by_stage["R3"].twin_sets >= 1
+    assert by_stage["R3→R4"].twin_sets >= 1
+    assert by_stage["R3"].same_winner_pct is not None
+
+
+def test_store_late_round_apis(tmp_path: Path):
+    store = GameStore(tmp_path / "games.sqlite")
+    now = datetime(2026, 1, 1, 12, 0, 0)
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(b"x")
+    R3 = ("9S", "8H", "7C")
+    R4 = ("6S", "5H", "4C")
+    full = R1 + R2 + R3 + R4
+
+    for gid, winner in (("20", Suit.DIAMONDS), ("21", Suit.DIAMONDS)):
+        store.record(
+            SessionDecision(
+                recording=True,
+                session_id=f"game_{gid}",
+                seq=1,
+                phase=GamePhase.FINISHED,
+                reason="test",
+                should_save=True,
+                game_id=gid,
+                table_cards=(),
+                drawn_cards=full,
+            ),
+            ExtractionResult(
+                race_state=RaceState.FINISHED,
+                winner_suit=winner,
+                high_low=None,
+                confident=True,
+                handicap_cards=HANDICAP_A if gid == "20" else HANDICAP_B,
+                draw_cards=full,
+            ),
+            shot,
+            now,
+            root=tmp_path,
+        )
+
+    signals = store.late_round_cascade(full, live_game_id="live99")
+    assert 3 in signals
+    assert set(signals[3].matched_game_ids) == {"20", "21"}
+    assert 4 in signals
+    stats = store.late_round_stats()
+    assert any(s.round_n == 3 and s.twin_sets >= 1 for s in stats)

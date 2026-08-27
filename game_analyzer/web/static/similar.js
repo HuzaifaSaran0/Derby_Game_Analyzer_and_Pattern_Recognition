@@ -13,6 +13,18 @@
   const lightbox = document.getElementById("lightbox");
   const lightboxImg = lightbox ? lightbox.querySelector("img") : null;
   const lightboxStatus = lightbox ? lightbox.querySelector(".lightbox-status") : null;
+  const lateFocus = document.querySelector("[data-late-focus]");
+  const lateStats = document.querySelector("[data-late-stats]");
+  const lateStatsGrid = document.querySelector("[data-late-stats-grid]");
+  const lateBadge = document.querySelector("[data-late-badge]");
+  const lateTitle = document.querySelector("[data-late-title]");
+  const lateDetail = document.querySelector("[data-late-detail]");
+  const lateWinners = document.querySelector("[data-late-winners]");
+  const lateGames = document.querySelector("[data-late-games]");
+  const lateShotsBtn = document.querySelector("[data-late-shots]");
+  const lateShotsHost = document.querySelector("[data-late-shots-host]");
+
+  let lateFocusIds = [];
 
   function openLightbox(url, caption) {
     if (!lightbox || !lightboxImg) return;
@@ -33,6 +45,10 @@
     return key.split("shared=").pop();
   }
 
+  function queryParams() {
+    return new URLSearchParams(window.location.search || "");
+  }
+
   function setKindBanner(data) {
     if (!kindBanner) return;
     if (!data.clusters || !data.clusters.length) {
@@ -45,7 +61,6 @@
       "near = ≥" +
       sharedMin +
       "/12 handicap · browse only (not a bet signal)";
-    // One page-level line (not repeated per set).
     if (data.exact_n > 0 && data.near_n > 0) {
       kindBanner.textContent =
         "EXACT + NEAR · " +
@@ -72,6 +87,39 @@
       kindBanner.className = "similar-kind-banner is-near";
     }
     kindBanner.hidden = false;
+  }
+
+  function renderLateStats(rows) {
+    if (!lateStats || !lateStatsGrid) return;
+    if (!rows || !rows.length) {
+      lateStats.hidden = true;
+      lateStatsGrid.innerHTML = "";
+      return;
+    }
+    lateStats.hidden = false;
+    lateStatsGrid.innerHTML = rows
+      .map(function (row) {
+        const same =
+          row.same_winner_pct != null ? row.same_winner_pct + "% same-winner sets" : "—";
+        const mean =
+          row.mean_agreement_pct != null
+            ? row.mean_agreement_pct + "% mean agreement"
+            : "—";
+        return (
+          '<div class="late-stat-card"><strong>' +
+          (row.stage || "") +
+          "</strong><span>" +
+          (row.twin_sets || 0) +
+          " twin sets · " +
+          (row.games_in_sets || 0) +
+          " games</span><span>" +
+          same +
+          "</span><span>" +
+          mean +
+          "</span></div>"
+        );
+      })
+      .join("");
   }
 
   function clusterDetail(cluster) {
@@ -203,6 +251,82 @@
     });
   }
 
+  async function loadLateFocusFromQuery() {
+    if (!lateFocus) return;
+    const params = queryParams();
+    const stage = (params.get("stage") || "").toLowerCase();
+    const ids = (params.get("ids") || "")
+      .split(",")
+      .map(function (s) {
+        return s.trim();
+      })
+      .filter(Boolean);
+    const liveId = params.get("live");
+    if (!stage || !ids.length) {
+      lateFocus.hidden = true;
+      return;
+    }
+    try {
+      const data = await live.get(
+        "/api/similar/late?stage=" +
+          encodeURIComponent(stage) +
+          "&ids=" +
+          encodeURIComponent(ids.join(",")) +
+          (liveId ? "&live=" + encodeURIComponent(liveId) : "")
+      );
+      if (!data.ready || !data.games || !data.games.length) {
+        lateFocus.hidden = true;
+        return;
+      }
+      lateFocusIds = data.game_ids || ids;
+      const roundN = data.round_n || 3;
+      if (lateBadge) lateBadge.textContent = "TWIN-R" + roundN;
+      if (lateTitle) {
+        lateTitle.textContent =
+          "R" +
+          roundN +
+          " exact matches" +
+          (data.live_game_id ? " · live #" + data.live_game_id : "");
+      }
+      const roundCards = (data.live_round_cards || []).join(", ") || "—";
+      if (lateDetail) {
+        lateDetail.textContent =
+          data.match_count +
+          " game(s) · round cards [" +
+          roundCards +
+          "]" +
+          (data.agreement_pct != null && data.majority_winner
+            ? " · " + data.agreement_pct + "% agree on " + data.majority_winner
+            : "");
+      }
+      const winnerBits = (data.winner_counts || [])
+        .map(function (w) {
+          return w[0] + "×" + w[1];
+        })
+        .join(" · ");
+      if (lateWinners) lateWinners.textContent = "Winners: " + (winnerBits || "—");
+      if (lateGames) {
+        lateGames.innerHTML = (data.games || [])
+          .map(function (game) {
+            return cards.gameCardBlock(game);
+          })
+          .join("");
+      }
+      lateFocus.hidden = false;
+      if (lateShotsHost) {
+        lateShotsHost.hidden = true;
+        lateShotsHost.innerHTML = "";
+      }
+      if (lateShotsBtn) {
+        lateShotsBtn.disabled = false;
+        lateShotsBtn.textContent = "Show screenshots";
+      }
+      lateFocus.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (_e) {
+      lateFocus.hidden = true;
+    }
+  }
+
   async function refresh() {
     loading.hidden = false;
     empty.hidden = true;
@@ -226,6 +350,8 @@
         data.games_shown +
         " games";
       live.stamp(true, data.cluster_count + " sets");
+      renderLateStats(data.late_round_stats || []);
+      await loadLateFocusFromQuery();
       if (!data.clusters || !data.clusters.length) {
         empty.hidden = false;
         empty.textContent =
@@ -248,6 +374,14 @@
       summary.textContent = "Failed to load — retrying…";
       live.stamp(false);
     }
+  }
+
+  if (lateShotsBtn && lateShotsHost) {
+    lateShotsBtn.addEventListener("click", async function () {
+      lateShotsBtn.disabled = true;
+      lateShotsBtn.textContent = "Screenshots loaded";
+      await loadShots(lateShotsHost, lateFocusIds);
+    });
   }
 
   refresh();

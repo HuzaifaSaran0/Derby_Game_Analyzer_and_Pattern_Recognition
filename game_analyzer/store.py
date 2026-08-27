@@ -573,6 +573,28 @@ class GameStore:
         ]
         return evaluate_live_twin(query, corpus, confidence=confidence)
 
+    def late_round_cascade(
+        self,
+        draw_cards: tuple[str, ...] = (),
+        *,
+        live_game_id: str | None = None,
+        max_round: int = 5,
+    ):
+        """R3→R4→R5 exact draw cascade against finished games."""
+        from game_analyzer.similarity import evaluate_late_round_cascade
+
+        return evaluate_late_round_cascade(
+            draw_cards,
+            self.similarity_corpus(),
+            live_game_id=live_game_id,
+            max_round=max_round,
+        )
+
+    def late_round_stats(self, *, max_round: int = 5):
+        from game_analyzer.similarity import late_round_corpus_stats
+
+        return late_round_corpus_stats(self.similarity_corpus(), max_round=max_round)
+
     def pre_race_outcome_for(self, game_id: str) -> PreRaceOutcome | None:
         game = self.get_game(game_id)
         if game is None:

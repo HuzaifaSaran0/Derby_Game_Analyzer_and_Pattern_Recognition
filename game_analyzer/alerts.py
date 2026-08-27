@@ -181,7 +181,18 @@ def parse_alert_log_line(line: str) -> dict[str, str] | None:
     kind = "alert"
     if message.startswith("[") and "]" in message:
         kind = message[1 : message.index("]")].lower()
-    return {"id": f"{stamp}|{message}", "at": stamp, "kind": kind, "message": message}
+    link = ""
+    if " · link=" in message:
+        link = message.rsplit(" · link=", 1)[-1].strip()
+    elif " link=" in message:
+        link = message.rsplit(" link=", 1)[-1].strip()
+    return {
+        "id": f"{stamp}|{message}",
+        "at": stamp,
+        "kind": kind,
+        "message": message,
+        "link": link,
+    }
 
 
 def read_recent_alerts(path: Path, *, limit: int = 20) -> list[dict[str, str]]:
@@ -228,6 +239,24 @@ def deliver_alert(
     alert_message: str | None,
 ) -> None:
     if not alert_fired or not alert_message:
+        return
+    append_alert_log(settings.log_path, alert_message)
+    if settings.webhook_url:
+        try:
+            post_webhook(settings.webhook_url, alert_message)
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            append_alert_log(settings.log_path, f"WEBHOOK FAILED: {error} — {alert_message}")
+    print(f"*** ALERT ({alert_kind}) *** {alert_message}")
+
+
+def deliver_similarity_alert(
+    settings: AlertSettings,
+    *,
+    alert_kind: str,
+    alert_message: str,
+) -> None:
+    """Log a similarity/twin alert (independent of confidence alert enable flag)."""
+    if not alert_message:
         return
     append_alert_log(settings.log_path, alert_message)
     if settings.webhook_url:

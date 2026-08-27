@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from game_analyzer.alerts import alert_settings_from_config, deliver_alert
+from game_analyzer.alerts import alert_settings_from_config, deliver_alert, deliver_similarity_alert
 from game_analyzer.capture import grab_frame, list_brave_tabs, list_monitors, read_page_game_id, read_page_timer
 from game_analyzer.config import load_config
 from game_analyzer.round_sync import (
@@ -44,6 +44,10 @@ _LAST_WAIT: WaitTrigger | None = None
 _CAPTURE_STARTED_AT: float | None = None
 _SCHEDULE_ANCHOR_AT: float | None = None
 _TIMER_SAMPLED_AT: float | None = None
+# Late-round (R3+) twin alerts: dedupe per live game / round.
+_LATE_ROUND_GAME_ID: str | None = None
+_LATE_ROUND_ALERTED: set[str] = set()
+_LAST_LATE_SIGNALS: dict[int, object] = {}
 
 
 def _timing_from_config(config: dict) -> RoundTiming:
@@ -68,6 +72,61 @@ def _should_dual_retry(saved) -> bool:
     if decision.should_save:
         return False
     return decision.reason == "same cards — wait for next round"
+
+
+def _maybe_late_round_alerts(config: dict, decision: SessionDecision) -> None:
+    """Alert when R3/R4/R5 draw cards exactly match past games (cascade).
+
+    Does not affect confidence alerts or handicap twin logic.
+    """
+    global _LATE_ROUND_GAME_ID, _LATE_ROUND_ALERTED, _LAST_LATE_SIGNALS
+    sim = config.get("similarity") or {}
+    if sim.get("notify", True) is False:
+        return
+    if sim.get("late_rounds", True) is False:
+        return
+    if not decision.recording or not decision.should_save:
+        return
+    draws = tuple(decision.drawn_cards or ())
+    if not draws:
+        return
+
+    from game_analyzer.similarity import (
+        LATE_ROUND_MAX,
+        LATE_ROUND_MIN,
+        full_draw_rounds,
+    )
+
+    game_id = decision.game_id
+    if game_id and game_id != _LATE_ROUND_GAME_ID:
+        _LATE_ROUND_GAME_ID = game_id
+        _LATE_ROUND_ALERTED = set()
+        _LAST_LATE_SIGNALS = {}
+
+    rounds_seen = full_draw_rounds(draws)
+    if rounds_seen < LATE_ROUND_MIN:
+        return
+
+    max_round = int(sim.get("late_round_max", LATE_ROUND_MAX))
+    signals = GAME_STORE.late_round_cascade(
+        draws,
+        live_game_id=game_id,
+        max_round=max_round,
+    )
+    settings = alert_settings_from_config(config)
+    for round_n, signal in signals.items():
+        if round_n < LATE_ROUND_MIN:
+            continue
+        dedupe = f"{game_id or 'live'}:{round_n}"
+        if dedupe in _LATE_ROUND_ALERTED:
+            continue
+        _LATE_ROUND_ALERTED.add(dedupe)
+        _LAST_LATE_SIGNALS[round_n] = signal
+        deliver_similarity_alert(
+            settings,
+            alert_kind=signal.kind,
+            alert_message=signal.message,
+        )
 
 
 def capture_once(config: dict | None = None):
@@ -124,6 +183,7 @@ def capture_once(config: dict | None = None):
         GAME_STORE.record(decision, result, raw_path, captured_at)
         # Anchor fixed 32/37 schedule waits to saved shots (not result-window peeks).
         _SCHEDULE_ANCHOR_AT = _CAPTURE_STARTED_AT
+        _maybe_late_round_alerts(config, decision)
     _LAST_DECISION = decision
     _LAST_FRAME = frame
     _LAST_PATH = raw_path

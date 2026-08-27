@@ -100,6 +100,17 @@
         tag: alert.id || "ga-alert",
         renotify: true,
       });
+      n.onclick = function () {
+        window.focus();
+        if (alert.link) {
+          window.location.href = alert.link;
+        } else if ((alert.kind || "").indexOf("twin-r") === 0) {
+          window.location.href = "/similar";
+        }
+        try {
+          n.close();
+        } catch (_e) {}
+      };
       setTimeout(function () {
         try {
           n.close();
@@ -119,6 +130,14 @@
     }
   }
 
+  function displayMessage(row) {
+    let msg = row.message || "";
+    if (row.link && msg.indexOf(" · link=") >= 0) {
+      msg = msg.split(" · link=")[0];
+    }
+    return msg;
+  }
+
   function renderList(rows) {
     if (!rows || !rows.length) {
       list.innerHTML = '<p class="muted">No alerts yet.</p>';
@@ -128,19 +147,40 @@
       .slice(0, 5)
       .map(function (row) {
         const kind = (row.kind || "alert").toLowerCase();
+        const link = row.link || "";
+        const clickable = link
+          ? ' data-alert-link="' + link + '" role="link" tabindex="0"'
+          : "";
         return (
           '<article class="alert-item is-' +
           kind +
-          '"><span class="alert-item-kind">' +
+          (link ? " is-link" : "") +
+          '"' +
+          clickable +
+          '><span class="alert-item-kind">' +
           (row.kind || "alert").toUpperCase() +
           '</span><span class="alert-item-when">' +
           formatWhen(row.at) +
           '</span><p class="alert-item-msg">' +
-          (row.message || "") +
+          displayMessage(row) +
+          (link ? '<span class="alert-item-go">Open Similar →</span>' : "") +
           "</p></article>"
         );
       })
       .join("");
+    list.querySelectorAll("[data-alert-link]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        const href = el.getAttribute("data-alert-link");
+        if (href) window.location.href = href;
+      });
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          const href = el.getAttribute("data-alert-link");
+          if (href) window.location.href = href;
+        }
+      });
+    });
   }
 
   function updateStatus(alerts) {

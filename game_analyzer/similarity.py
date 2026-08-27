@@ -522,3 +522,274 @@ def format_cluster_headline(cluster: SimilarityCluster) -> str:
         f"{badge} · {cluster.stage.value} · {cluster.match_pct:.0f}% · "
         f"{cluster.size} games · {winner_note}{shared_note}"
     )
+
+
+# --- Late-round (R3 / R4 / R5) cascade: independent of handicap twin logic ---
+
+LATE_ROUND_MIN = 3
+LATE_ROUND_MAX = 5
+
+
+@dataclass(frozen=True)
+class LateRoundHit:
+    game_id: str
+    winner_suit: str | None
+    draw_cards: tuple[str, ...]
+    handicap_cards: tuple[tuple[str, ...], ...]
+    round_n: int
+    round_cards: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class LateRoundSignal:
+    """Live or query alert for an exact late-round draw match."""
+
+    round_n: int
+    live_game_id: str | None
+    live_round_cards: tuple[str, ...]
+    matches: tuple[LateRoundHit, ...]
+    winner_counts: tuple[tuple[str, int], ...]
+    agreement_pct: float | None
+    majority_winner: str | None
+    message: str
+    similar_path: str
+
+    @property
+    def kind(self) -> str:
+        return f"twin-r{self.round_n}"
+
+    @property
+    def match_count(self) -> int:
+        return len(self.matches)
+
+    @property
+    def matched_game_ids(self) -> tuple[str, ...]:
+        return tuple(m.game_id for m in self.matches)
+
+
+@dataclass(frozen=True)
+class LateRoundStageStats:
+    """Corpus winner agreement for a late-round cascade stage."""
+
+    stage: str  # "R3", "R3→R4", "R3→R4→R5"
+    round_n: int
+    twin_sets: int
+    games_in_sets: int
+    same_winner_sets: int
+    same_winner_pct: float | None
+    mean_agreement_pct: float | None
+
+
+def draw_round_cards(
+    draw_cards: tuple[str, ...] | list[str],
+    round_n: int,
+) -> tuple[str, ...] | None:
+    """1-based draw round slice (R3 = cards 7–9)."""
+    if round_n < 1:
+        return None
+    start = (round_n - 1) * CARDS_PER_DRAW_ROUND
+    end = start + CARDS_PER_DRAW_ROUND
+    clean = tuple(c for c in draw_cards if c and not str(c).startswith("?"))
+    if len(clean) < end:
+        return None
+    return clean[start:end]
+
+
+def draw_round_key(
+    draw_cards: tuple[str, ...] | list[str],
+    round_n: int,
+) -> str | None:
+    cards = draw_round_cards(draw_cards, round_n)
+    return _card_key(cards) if cards else None
+
+
+def full_draw_rounds(draw_cards: tuple[str, ...] | list[str]) -> int:
+    clean = tuple(c for c in draw_cards if c and not str(c).startswith("?"))
+    return len(clean) // CARDS_PER_DRAW_ROUND
+
+
+def find_late_round_matches(
+    live_draws: tuple[str, ...] | list[str],
+    corpus: list[GameFingerprint],
+    round_n: int,
+    *,
+    pool_ids: set[str] | frozenset[str] | tuple[str, ...] | list[str] | None = None,
+    exclude_game_id: str | None = None,
+) -> list[LateRoundHit]:
+    """Exact match of one draw round against corpus (optionally restricted to a pool)."""
+    if round_n < LATE_ROUND_MIN or round_n > LATE_ROUND_MAX:
+        return []
+    live_key = draw_round_key(live_draws, round_n)
+    live_cards = draw_round_cards(live_draws, round_n)
+    if live_key is None or live_cards is None:
+        return []
+    allow = set(pool_ids) if pool_ids is not None else None
+    hits: list[LateRoundHit] = []
+    for fp in corpus:
+        if exclude_game_id and fp.game_id == exclude_game_id:
+            continue
+        if allow is not None and fp.game_id not in allow:
+            continue
+        other_key = draw_round_key(fp.draw_cards, round_n)
+        if other_key is None or other_key != live_key:
+            continue
+        other_cards = draw_round_cards(fp.draw_cards, round_n)
+        if other_cards is None:
+            continue
+        hits.append(
+            LateRoundHit(
+                game_id=fp.game_id,
+                winner_suit=fp.winner_suit,
+                draw_cards=fp.draw_cards,
+                handicap_cards=fp.handicap_cards,
+                round_n=round_n,
+                round_cards=other_cards,
+            )
+        )
+    hits.sort(key=lambda h: h.game_id)
+    return hits
+
+
+def _late_winner_summary(
+    hits: list[LateRoundHit],
+) -> tuple[tuple[tuple[str, int], ...], float | None, str | None]:
+    counts: Counter[str] = Counter()
+    for hit in hits:
+        if hit.winner_suit:
+            counts[hit.winner_suit.title()] += 1
+    if not counts:
+        return (), None, None
+    ranked = tuple(counts.most_common())
+    total = sum(counts.values())
+    agreement = round(100.0 * ranked[0][1] / total, 1) if total else None
+    return ranked, agreement, ranked[0][0]
+
+
+def build_late_round_signal(
+    live_draws: tuple[str, ...] | list[str],
+    hits: list[LateRoundHit],
+    round_n: int,
+    *,
+    live_game_id: str | None = None,
+) -> LateRoundSignal | None:
+    if not hits:
+        return None
+    live_cards = draw_round_cards(live_draws, round_n)
+    if live_cards is None:
+        return None
+    winners, agreement, majority = _late_winner_summary(hits)
+    winner_bits = " · ".join(f"{name}×{n}" for name, n in winners) if winners else "no winners"
+    ids = ",".join(h.game_id for h in hits)
+    live_q = f"&live={live_game_id}" if live_game_id else ""
+    path = f"/similar?stage=r{round_n}&ids={ids}{live_q}"
+    agree_note = f", {agreement:.0f}% agree on {majority}" if agreement is not None and majority else ""
+    message = (
+        f"[TWIN-R{round_n}] Game {live_game_id or '-'} — "
+        f"{len(hits)} past game(s) match R{round_n} draws [{', '.join(live_cards)}] "
+        f"· winners: {winner_bits}{agree_note} · link={path}"
+    )
+    return LateRoundSignal(
+        round_n=round_n,
+        live_game_id=live_game_id,
+        live_round_cards=live_cards,
+        matches=tuple(hits),
+        winner_counts=winners,
+        agreement_pct=agreement,
+        majority_winner=majority,
+        message=message,
+        similar_path=path,
+    )
+
+
+def evaluate_late_round_cascade(
+    live_draws: tuple[str, ...] | list[str],
+    corpus: list[GameFingerprint],
+    *,
+    live_game_id: str | None = None,
+    max_round: int = LATE_ROUND_MAX,
+) -> dict[int, LateRoundSignal]:
+    """Run R3→R4→R5 cascade; return a signal for each stage that still has matches."""
+    rounds_seen = full_draw_rounds(live_draws)
+    end = min(max_round, LATE_ROUND_MAX, rounds_seen)
+    out: dict[int, LateRoundSignal] = {}
+    pool: set[str] | None = None
+    for round_n in range(LATE_ROUND_MIN, end + 1):
+        hits = find_late_round_matches(
+            live_draws,
+            corpus,
+            round_n,
+            pool_ids=pool,
+            exclude_game_id=live_game_id,
+        )
+        signal = build_late_round_signal(
+            live_draws, hits, round_n, live_game_id=live_game_id
+        )
+        if signal is None:
+            break
+        out[round_n] = signal
+        pool = set(signal.matched_game_ids)
+        if not pool:
+            break
+    return out
+
+
+def late_round_corpus_stats(
+    corpus: list[GameFingerprint],
+    *,
+    max_round: int = LATE_ROUND_MAX,
+) -> list[LateRoundStageStats]:
+    """Winner-agreement stats for R3, R3→R4, and R3→R4→R5 exact twin sets."""
+    end = min(max_round, LATE_ROUND_MAX)
+    stages: list[LateRoundStageStats] = []
+
+    def _bucket_key(fp: GameFingerprint, through_round: int) -> str | None:
+        parts: list[str] = []
+        for rn in range(LATE_ROUND_MIN, through_round + 1):
+            key = draw_round_key(fp.draw_cards, rn)
+            if key is None:
+                return None
+            parts.append(key)
+        return "||".join(parts)
+
+    for through in range(LATE_ROUND_MIN, end + 1):
+        buckets: dict[str, list[GameFingerprint]] = {}
+        for fp in corpus:
+            if not fp.winner_suit:
+                continue
+            key = _bucket_key(fp, through)
+            if key is None:
+                continue
+            buckets.setdefault(key, []).append(fp)
+
+        twin_sets = 0
+        games_in = 0
+        same_sets = 0
+        agreements: list[float] = []
+        for games in buckets.values():
+            if len(games) < 2:
+                continue
+            twin_sets += 1
+            games_in += len(games)
+            _winners, agreement, same = _winner_stats(games)
+            if same:
+                same_sets += 1
+            if agreement is not None:
+                agreements.append(agreement)
+
+        label = "→".join(f"R{n}" for n in range(LATE_ROUND_MIN, through + 1))
+        stages.append(
+            LateRoundStageStats(
+                stage=label,
+                round_n=through,
+                twin_sets=twin_sets,
+                games_in_sets=games_in,
+                same_winner_sets=same_sets,
+                same_winner_pct=(
+                    round(100.0 * same_sets / twin_sets, 1) if twin_sets else None
+                ),
+                mean_agreement_pct=(
+                    round(sum(agreements) / len(agreements), 1) if agreements else None
+                ),
+            )
+        )
+    return stages

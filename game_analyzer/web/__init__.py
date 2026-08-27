@@ -20,6 +20,7 @@ from game_analyzer.similarity import (
     NEAR_SHARED_MIN,
     cluster_badge_kind,
     cluster_kind_badge,
+    draw_round_cards,
     format_cluster_headline,
 )
 from game_analyzer.store import GameStore
@@ -37,7 +38,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "17"
+STATIC_VER = "18"
 
 
 def _neighbors(game_ids: list[str], game_id: str) -> tuple[str | None, str | None]:
@@ -290,6 +291,18 @@ def _similar_payload(store: GameStore, *, exact_only: bool = False) -> dict:
     games = {g.game_id for c in clusters for g in c.games}
     near_same_n = sum(1 for c in clusters if not c.exact and c.winners_same)
     near_mixed_n = sum(1 for c in clusters if not c.exact and c.winners_same is False)
+    late_stats = [
+        {
+            "stage": s.stage,
+            "round_n": s.round_n,
+            "twin_sets": s.twin_sets,
+            "games_in_sets": s.games_in_sets,
+            "same_winner_sets": s.same_winner_sets,
+            "same_winner_pct": s.same_winner_pct,
+            "mean_agreement_pct": s.mean_agreement_pct,
+        }
+        for s in store.late_round_stats()
+    ]
     return {
         "corpus_n": len(corpus),
         "cluster_count": len(clusters),
@@ -299,6 +312,7 @@ def _similar_payload(store: GameStore, *, exact_only: bool = False) -> dict:
         "near_mixed_n": near_mixed_n,
         "near_shared_min": NEAR_SHARED_MIN,
         "games_shown": len(games),
+        "late_round_stats": late_stats,
         "clusters": [
             {
                 "headline": format_cluster_headline(c),
@@ -318,6 +332,66 @@ def _similar_payload(store: GameStore, *, exact_only: bool = False) -> dict:
             }
             for c in clusters
         ],
+    }
+
+
+def _late_round_focus_payload(
+    store: GameStore,
+    *,
+    round_n: int,
+    game_ids: list[str],
+    live_game_id: str | None = None,
+) -> dict:
+    corpus = {fp.game_id: fp for fp in store.similarity_corpus()}
+    games = []
+    winners: dict[str, int] = {}
+    live_round_cards: list[str] = []
+    for gid in game_ids:
+        fp = corpus.get(gid)
+        if fp is None:
+            game = store.get_game(gid)
+            if game is None:
+                continue
+            from game_analyzer.similarity import build_fingerprint
+
+            fp = build_fingerprint(
+                game.game_id,
+                game.handicap_cards,
+                game.draw_cards or game.guess_draw_cards,
+                winner_suit=game.winner_suit,
+            )
+        if fp is None:
+            continue
+        payload = fingerprint_payload(fp)
+        round_cards = draw_round_cards(fp.draw_cards, round_n)
+        payload["round_n"] = round_n
+        payload["round_cards"] = list(round_cards) if round_cards else []
+        games.append(payload)
+        if fp.winner_suit:
+            winners[fp.winner_suit.title()] = winners.get(fp.winner_suit.title(), 0) + 1
+    if live_game_id:
+        live = store.get_game(live_game_id)
+        if live is not None:
+            cards = draw_round_cards(live.draw_cards or live.guess_draw_cards, round_n)
+            live_round_cards = list(cards) if cards else []
+    winner_counts = sorted(winners.items(), key=lambda row: (-row[1], row[0]))
+    total = sum(winners.values())
+    majority = winner_counts[0][0] if winner_counts else None
+    agreement = (
+        round(100.0 * winner_counts[0][1] / total, 1) if total and winner_counts else None
+    )
+    return {
+        "ready": bool(games),
+        "stage": f"r{round_n}",
+        "round_n": round_n,
+        "live_game_id": live_game_id,
+        "live_round_cards": live_round_cards,
+        "games": games,
+        "game_ids": [g["game_id"] for g in games],
+        "winner_counts": winner_counts,
+        "majority_winner": majority,
+        "agreement_pct": agreement,
+        "match_count": len(games),
     }
 
 
@@ -406,6 +480,44 @@ def create_app(store: GameStore | None = None) -> FastAPI:
     @app.get("/api/similar")
     def api_similar(exact_only: bool = Query(False)):
         return JSONResponse(_similar_payload(store, exact_only=exact_only), headers=NO_CACHE)
+
+    @app.get("/api/similar/late")
+    def api_similar_late(
+        stage: str = Query("r3"),
+        ids: str = Query(""),
+        live: str | None = Query(None),
+    ):
+        stage_clean = stage.strip().lower().lstrip("r")
+        try:
+            round_n = int(stage_clean)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="stage must be r3, r4, or r5")
+        if round_n not in {3, 4, 5}:
+            raise HTTPException(status_code=400, detail="stage must be r3, r4, or r5")
+        game_ids = [g.strip() for g in ids.split(",") if g.strip()]
+        payload = _late_round_focus_payload(
+            store,
+            round_n=round_n,
+            game_ids=game_ids,
+            live_game_id=live,
+        )
+        return JSONResponse(payload, headers=NO_CACHE)
+
+    @app.get("/api/similar/late-stats")
+    def api_similar_late_stats():
+        rows = [
+            {
+                "stage": s.stage,
+                "round_n": s.round_n,
+                "twin_sets": s.twin_sets,
+                "games_in_sets": s.games_in_sets,
+                "same_winner_sets": s.same_winner_sets,
+                "same_winner_pct": s.same_winner_pct,
+                "mean_agreement_pct": s.mean_agreement_pct,
+            }
+            for s in store.late_round_stats()
+        ]
+        return JSONResponse({"stages": rows}, headers=NO_CACHE)
 
     @app.get("/api/history/{game_id}")
     def api_history(game_id: str):
