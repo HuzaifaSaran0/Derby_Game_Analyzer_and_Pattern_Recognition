@@ -138,33 +138,37 @@
     return msg;
   }
 
+  function isSimilarityKind(kind) {
+    const k = (kind || "").toLowerCase();
+    return k.indexOf("twin-r") === 0;
+  }
+
   function renderList(rows) {
-    if (!rows || !rows.length) {
-      list.innerHTML = '<p class="muted">No alerts yet.</p>';
+    const twins = (rows || []).filter(function (row) {
+      return isSimilarityKind(row.kind);
+    });
+    if (!twins.length) {
+      list.innerHTML = '<p class="muted">No similarity twins yet.</p>';
       return;
     }
-    list.innerHTML = rows
+    list.innerHTML = twins
       .slice(0, 5)
       .map(function (row) {
-        const kind = (row.kind || "alert").toLowerCase();
-        const link = row.link || "";
-        const clickable = link
-          ? ' data-alert-link="' + link + '" role="link" tabindex="0"'
-          : "";
+        const kind = (row.kind || "twin-r3").toLowerCase();
+        const link = row.link || "/similar";
+        const clickable = ' data-alert-link="' + link + '" role="link" tabindex="0"';
         return (
           '<article class="alert-item is-' +
           kind +
-          (link ? " is-link" : "") +
-          '"' +
+          ' is-link"' +
           clickable +
           '><span class="alert-item-kind">' +
-          (row.kind || "alert").toUpperCase() +
+          (row.kind || "twin").toUpperCase() +
           '</span><span class="alert-item-when">' +
           formatWhen(row.at) +
           '</span><p class="alert-item-msg">' +
           displayMessage(row) +
-          (link ? '<span class="alert-item-go">Open Similar →</span>' : "") +
-          "</p></article>"
+          '<span class="alert-item-go">Open Similar →</span></p></article>'
         );
       })
       .join("");
@@ -185,7 +189,34 @@
 
   function updateStatus(alerts) {
     if (!status) return;
-    status.textContent = "Latest 5 · similarity";
+    const n = ((alerts && alerts.recent) || []).filter(function (row) {
+      return isSimilarityKind(row.kind);
+    }).length;
+    status.textContent = n ? "Latest " + n + " · R3–R5 twins" : "No twins yet";
+  }
+
+  function placePanel() {
+    if (!panel || !bell) return;
+    const pad = 12;
+    const rect = bell.getBoundingClientRect();
+    const vw = window.innerWidth || document.documentElement.clientWidth;
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    panel.style.maxWidth = Math.max(200, vw - pad * 2) + "px";
+    panel.style.maxHeight = Math.max(160, vh - pad * 2) + "px";
+    // Measure after making visible (caller unhides first).
+    const pw = panel.offsetWidth || Math.min(360, vw - pad * 2);
+    const ph = panel.offsetHeight || 240;
+    let left = rect.left;
+    let top = rect.bottom + 8;
+    if (left + pw > vw - pad) left = vw - pad - pw;
+    if (left < pad) left = pad;
+    if (top + ph > vh - pad) {
+      // Prefer above the bell when not enough room below.
+      const above = rect.top - 8 - ph;
+      top = above >= pad ? above : Math.max(pad, vh - pad - ph);
+    }
+    panel.style.left = Math.round(left) + "px";
+    panel.style.top = Math.round(top) + "px";
   }
 
   function setOpen(next) {
@@ -197,6 +228,9 @@
       setBadge(0);
       if (lastAlertId) localStorage.setItem(SEEN_KEY, lastAlertId);
       renderList(recent);
+      placePanel();
+      // Re-measure after list paint (height can grow).
+      requestAnimationFrame(placePanel);
     }
   }
 
@@ -215,10 +249,15 @@
   }
 
   function applyAlerts(alerts) {
-    updateStatus(alerts);
-    recent = (alerts && alerts.recent) || [];
+    recent = ((alerts && alerts.recent) || []).filter(function (row) {
+      return isSimilarityKind(row.kind);
+    });
+    updateStatus({ recent: recent });
     if (open) renderList(recent);
-    const latest = alerts && alerts.latest;
+    const latest =
+      (alerts && alerts.latest && isSimilarityKind(alerts.latest.kind) && alerts.latest) ||
+      recent[0] ||
+      null;
     if (!alertPrimed) {
       alertPrimed = true;
       if (latest && latest.id) {
@@ -255,6 +294,17 @@
     setOpen(false);
   });
 
+  window.addEventListener("resize", function () {
+    if (open) placePanel();
+  });
+  window.addEventListener(
+    "scroll",
+    function () {
+      if (open) placePanel();
+    },
+    true
+  );
+
   if (soundBtn) {
     soundBtn.addEventListener("click", function (e) {
       e.stopPropagation();
@@ -287,7 +337,7 @@
       if (pushOn && Notification.permission === "granted") {
         try {
           new Notification("Game Analyzer", {
-            body: "Phone alerts enabled",
+            body: "Similarity twin alerts enabled",
             tag: "ga-alert-test",
           });
         } catch (_e) {}

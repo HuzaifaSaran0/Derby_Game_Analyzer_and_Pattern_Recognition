@@ -541,6 +541,15 @@ class GameStore:
 
         return late_round_corpus_stats(self.similarity_corpus(), max_round=max_round)
 
+    def late_round_twin_sets(self, *, max_round: int = 5, min_round: int = 3):
+        from game_analyzer.similarity import build_late_round_twin_sets
+
+        return build_late_round_twin_sets(
+            self.similarity_corpus(),
+            max_round=max_round,
+            min_round=min_round,
+        )
+
     def pre_race_outcome_for(self, game_id: str) -> PreRaceOutcome | None:
         game = self.get_game(game_id)
         if game is None:

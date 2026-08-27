@@ -44,15 +44,11 @@ a { color: var(--accent); }
 }
 
 .site-header-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  display: block;
 }
 
 .site-brand {
   min-width: 0;
-  flex: 1;
 }
 
 .site-brand h1 {
@@ -63,6 +59,20 @@ a { color: var(--accent); }
 .site-brand h1 a {
   color: var(--text);
   text-decoration: none;
+}
+
+.site-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.site-status-row .live-note {
+  margin: 0;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .alert-bell-wrap {
@@ -106,18 +116,19 @@ a { color: var(--accent); }
 .alert-bell-badge[hidden] { display: none !important; }
 
 .alert-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  width: min(92vw, 360px);
-  max-height: min(70vh, 480px);
+  position: fixed;
+  z-index: 80;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(70vh, calc(100dvh - 24px));
   overflow: auto;
-  z-index: 40;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  /* top/left set by alerts.js so the panel stays fully on-screen */
+  top: 64px;
+  left: 12px;
 }
 .alert-panel[hidden] { display: none !important; }
 .alert-panel-head {
@@ -258,11 +269,9 @@ a { color: var(--accent); }
   margin: 0;
   font-size: 0.82rem;
   color: var(--muted);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  align-items: baseline;
-  line-height: 1.35;
+  display: block;
+  line-height: 1.45;
+  word-break: break-word;
 }
 .stats-sep { opacity: 0.5; }
 .stat-conf { color: var(--accent); }
@@ -501,6 +510,27 @@ a { color: var(--accent); }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 10px;
+}
+
+.similar-shot-game {
+  margin-bottom: 14px;
+}
+
+.shot-game-title {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.matched-round-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.cluster-shared-rounds {
+  margin: 8px 0 10px;
 }
 
 .shot-thumb {

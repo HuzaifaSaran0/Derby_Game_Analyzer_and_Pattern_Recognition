@@ -4,9 +4,6 @@
 {% block content %}
 <section class="similar-toolbar panel">
   <button type="button" class="btn btn-sm" data-sim-refresh>Refresh</button>
-  <label class="check-label">
-    <input type="checkbox" data-exact-only /> Exact only
-  </label>
   <p class="similar-summary" data-sim-summary>Loading…</p>
 </section>
 
@@ -24,14 +21,14 @@
   <p class="late-focus-winners" data-late-winners></p>
   <div class="similar-games-row" data-late-games></div>
   <div class="similar-actions">
-    <button type="button" class="btn btn-sm" data-late-shots>Show screenshots</button>
+    <button type="button" class="btn btn-sm" data-late-shots>See screenshots</button>
   </div>
   <div class="similar-shots" data-late-shots-host hidden></div>
 </section>
 
 <p class="similar-kind-banner" data-sim-kind hidden></p>
 <p class="empty" data-sim-loading>Scanning finished games…</p>
-<p class="empty" data-sim-empty hidden>No similar games found.</p>
+<p class="empty" data-sim-empty hidden>No late-round twin games found.</p>
 <div class="similar-list" data-sim-list></div>
 
 <div id="lightbox" class="lightbox" hidden>

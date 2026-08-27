@@ -757,3 +757,94 @@ def late_round_corpus_stats(
             )
         )
     return stages
+
+
+@dataclass(frozen=True)
+class LateRoundTwinSet:
+    """Browseable twin set: games sharing exact R3 (and optionally R4/R5)."""
+
+    stage: str
+    round_n: int
+    matched_rounds: tuple[int, ...]
+    key: str
+    games: tuple[GameFingerprint, ...]
+    winner_counts: tuple[tuple[str, int], ...]
+    agreement_pct: float | None
+    winners_same: bool | None
+    # Shared cards for each matched round (same across the set).
+    round_cards: tuple[tuple[int, tuple[str, ...]], ...]
+
+    @property
+    def size(self) -> int:
+        return len(self.games)
+
+    @property
+    def majority_winner(self) -> str | None:
+        if not self.winner_counts:
+            return None
+        return self.winner_counts[0][0]
+
+
+def build_late_round_twin_sets(
+    corpus: list[GameFingerprint],
+    *,
+    max_round: int = LATE_ROUND_MAX,
+    min_round: int = LATE_ROUND_MIN,
+) -> list[LateRoundTwinSet]:
+    """Exact late-round twin sets for the Similar page (R3 / R3→R4 / R3→R4→R5)."""
+    start = max(LATE_ROUND_MIN, min_round)
+    end = min(max_round, LATE_ROUND_MAX)
+    sets: list[LateRoundTwinSet] = []
+
+    def _bucket_key(fp: GameFingerprint, through_round: int) -> str | None:
+        parts: list[str] = []
+        for rn in range(LATE_ROUND_MIN, through_round + 1):
+            key = draw_round_key(fp.draw_cards, rn)
+            if key is None:
+                return None
+            parts.append(f"R{rn}:{key}")
+        return "||".join(parts)
+
+    for through in range(start, end + 1):
+        buckets: dict[str, list[GameFingerprint]] = {}
+        for fp in corpus:
+            if not fp.winner_suit:
+                continue
+            key = _bucket_key(fp, through)
+            if key is None:
+                continue
+            buckets.setdefault(key, []).append(fp)
+
+        matched_rounds = tuple(range(LATE_ROUND_MIN, through + 1))
+        stage = "→".join(f"R{n}" for n in matched_rounds)
+        for key, games in buckets.items():
+            if len(games) < 2:
+                continue
+            sample = games[0]
+            round_cards: list[tuple[int, tuple[str, ...]]] = []
+            for rn in matched_rounds:
+                cards = draw_round_cards(sample.draw_cards, rn)
+                if cards is None:
+                    round_cards = []
+                    break
+                round_cards.append((rn, cards))
+            if len(round_cards) != len(matched_rounds):
+                continue
+            winners, agreement, same = _winner_stats(games)
+            sets.append(
+                LateRoundTwinSet(
+                    stage=stage,
+                    round_n=through,
+                    matched_rounds=matched_rounds,
+                    key=key,
+                    games=tuple(sorted(games, key=lambda g: g.game_id)),
+                    winner_counts=winners,
+                    agreement_pct=agreement,
+                    winners_same=same,
+                    round_cards=tuple(round_cards),
+                )
+            )
+
+    # Deepest first, then larger sets, then stable key.
+    sets.sort(key=lambda s: (-s.round_n, -s.size, s.key))
+    return sets

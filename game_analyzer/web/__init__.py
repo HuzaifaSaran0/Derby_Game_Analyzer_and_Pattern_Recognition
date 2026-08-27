@@ -13,16 +13,11 @@ from game_analyzer.alerts import (
     read_recent_alerts,
 )
 from game_analyzer.config import load_config
-from game_analyzer.similarity import (
-    NEAR_SHARED_MIN,
-    cluster_badge_kind,
-    cluster_kind_badge,
-    draw_round_cards,
-    format_cluster_headline,
-)
+from game_analyzer.similarity import NEAR_SHARED_MIN, draw_round_cards
 from game_analyzer.store import GameStore
 from game_analyzer.web.cards import (
-    fingerprint_payload,
+    late_round_game_payload,
+    styled_cards,
     styled_table_rows,
 )
 
@@ -33,7 +28,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "19"
+STATIC_VER = "23"
 
 
 def _neighbors(game_ids: list[str], game_id: str) -> tuple[str | None, str | None]:
@@ -103,35 +98,53 @@ def _game_payload(store: GameStore, game_id: str, *, include_frames: bool = True
 def _stats_payload(store: GameStore) -> dict:
     finished = len(store.list_game_ids(finished_only=True))
     late = store.late_round_stats()
-    r3 = next((s for s in late if s.round_n == 3), None)
+    bits: list[str] = []
+    for stage in late:
+        label = f"R{stage.round_n}"
+        if not stage.twin_sets:
+            bits.append(f"{label} twins —")
+            continue
+        if stage.same_winner_pct is not None:
+            bits.append(
+                f"{label} twins {stage.twin_sets} · same-winner {stage.same_winner_pct:.0f}%"
+            )
+        else:
+            bits.append(f"{label} twins {stage.twin_sets}")
     return {
         "finished_games": finished,
-        "late_round_text": (
-            f"R3 twins {r3.twin_sets} · same-winner {r3.same_winner_pct:.0f}%"
-            if r3 and r3.twin_sets and r3.same_winner_pct is not None
-            else "R3 twins —"
-        ),
+        "late_round_text": " · ".join(bits) if bits else "Late-round twins —",
+        "late_round_stats": [
+            {
+                "stage": s.stage,
+                "round_n": s.round_n,
+                "twin_sets": s.twin_sets,
+                "games_in_sets": s.games_in_sets,
+                "same_winner_sets": s.same_winner_sets,
+                "same_winner_pct": s.same_winner_pct,
+                "mean_agreement_pct": s.mean_agreement_pct,
+            }
+            for s in late
+        ],
     }
 
 
 def _alerts_payload(*, limit: int = 10) -> dict:
     settings = alert_settings_from_config(load_config())
-    recent = read_recent_alerts(settings.log_path, limit=limit)
+    recent = read_recent_alerts(settings.log_path, limit=limit, similarity_only=True)
     return {
         "enabled": True,
+        "mode": "similarity",
         "latest": recent[0] if recent else None,
         "recent": recent,
     }
 
 
 def _similar_payload(store: GameStore, *, exact_only: bool = False) -> dict:
+    """Similar page: late-round (R3/R4/R5) twin sets only."""
+    del exact_only  # kept for URL compat; handicap near/exact browse removed
     corpus = store.similarity_corpus()
-    clusters = store.similarity_clusters(exact_only=exact_only)
-    exact_n = sum(1 for c in clusters if c.exact)
-    near_n = sum(1 for c in clusters if not c.exact)
-    games = {g.game_id for c in clusters for g in c.games}
-    near_same_n = sum(1 for c in clusters if not c.exact and c.winners_same)
-    near_mixed_n = sum(1 for c in clusters if not c.exact and c.winners_same is False)
+    twin_sets = store.late_round_twin_sets()
+    late_stats_raw = store.late_round_stats()
     late_stats = [
         {
             "stage": s.stage,
@@ -142,36 +155,66 @@ def _similar_payload(store: GameStore, *, exact_only: bool = False) -> dict:
             "same_winner_pct": s.same_winner_pct,
             "mean_agreement_pct": s.mean_agreement_pct,
         }
-        for s in store.late_round_stats()
+        for s in late_stats_raw
     ]
+    # Headline counts must match the accuracy cards (same late_round_stats source).
+    r3 = next((s for s in late_stats_raw if s.round_n == 3), None)
+    games = {g.game_id for s in twin_sets for g in s.games}
     return {
         "corpus_n": len(corpus),
-        "cluster_count": len(clusters),
-        "exact_n": exact_n,
-        "near_n": near_n,
-        "near_same_n": near_same_n,
-        "near_mixed_n": near_mixed_n,
+        "cluster_count": len(twin_sets),
+        "exact_n": len(twin_sets),
+        "near_n": 0,
+        "near_same_n": 0,
+        "near_mixed_n": 0,
         "near_shared_min": NEAR_SHARED_MIN,
         "games_shown": len(games),
+        "r3_twin_sets": r3.twin_sets if r3 else 0,
+        "r3_games": r3.games_in_sets if r3 else 0,
+        "mode": "late_rounds",
         "late_round_stats": late_stats,
         "clusters": [
             {
-                "headline": format_cluster_headline(c),
-                "badge": cluster_kind_badge(c),
-                "badge_kind": cluster_badge_kind(c),
-                "key": c.key,
-                "exact": c.exact,
-                "stage": c.stage.value,
-                "match_pct": c.match_pct,
-                "size": c.size,
-                "winners_same": c.winners_same,
-                "winner_counts": list(c.winner_counts),
-                "majority_winner": c.majority_winner,
-                "agreement_pct": c.agreement_pct,
-                "games": [fingerprint_payload(g) for g in c.games],
-                "game_ids": [g.game_id for g in c.games],
+                "headline": (
+                    f"{s.stage} exact · {s.size} games"
+                    + (
+                        f" · {s.agreement_pct:.0f}% agree on {s.majority_winner}"
+                        if s.agreement_pct is not None and s.majority_winner
+                        else ""
+                    )
+                ),
+                "badge": s.stage,
+                "badge_kind": "exact",
+                "key": s.key,
+                "exact": True,
+                "stage": s.stage,
+                "round_n": s.round_n,
+                "matched_rounds": list(s.matched_rounds),
+                "match_pct": 100.0,
+                "size": s.size,
+                "winners_same": s.winners_same,
+                "winner_counts": list(s.winner_counts),
+                "majority_winner": s.majority_winner,
+                "agreement_pct": s.agreement_pct,
+                "round_cards": [
+                    {
+                        "round_n": rn,
+                        "cards": styled_cards(cards),
+                        "codes": list(cards),
+                    }
+                    for rn, cards in s.round_cards
+                ],
+                "games": [
+                    late_round_game_payload(
+                        g,
+                        matched_rounds=s.matched_rounds,
+                        round_cards=s.round_cards,
+                    )
+                    for g in s.games
+                ],
+                "game_ids": [g.game_id for g in s.games],
             }
-            for c in clusters
+            for s in twin_sets
         ],
     }
 
@@ -183,18 +226,21 @@ def _late_round_focus_payload(
     game_ids: list[str],
     live_game_id: str | None = None,
 ) -> dict:
+    """Alert deep-link: handicap + cascade-matched rounds (R3…Rn) only."""
+    from game_analyzer.similarity import LATE_ROUND_MIN, build_fingerprint
+
+    matched_rounds = tuple(range(LATE_ROUND_MIN, round_n + 1))
     corpus = {fp.game_id: fp for fp in store.similarity_corpus()}
     games = []
     winners: dict[str, int] = {}
     live_round_cards: list[str] = []
+    shared_round_cards: list[tuple[int, tuple[str, ...]]] = []
     for gid in game_ids:
         fp = corpus.get(gid)
         if fp is None:
             game = store.get_game(gid)
             if game is None:
                 continue
-            from game_analyzer.similarity import build_fingerprint
-
             fp = build_fingerprint(
                 game.game_id,
                 game.handicap_cards,
@@ -203,10 +249,32 @@ def _late_round_focus_payload(
             )
         if fp is None:
             continue
-        payload = fingerprint_payload(fp)
-        round_cards = draw_round_cards(fp.draw_cards, round_n)
+        if not shared_round_cards:
+            for rn in matched_rounds:
+                cards = draw_round_cards(fp.draw_cards, rn)
+                if cards is None:
+                    shared_round_cards = []
+                    break
+                shared_round_cards.append((rn, cards))
+        round_cards = tuple(shared_round_cards) if shared_round_cards else ()
+        if not round_cards:
+            # Fall back to per-game extraction if sample incomplete.
+            built: list[tuple[int, tuple[str, ...]]] = []
+            for rn in matched_rounds:
+                cards = draw_round_cards(fp.draw_cards, rn)
+                if cards is None:
+                    built = []
+                    break
+                built.append((rn, cards))
+            round_cards = tuple(built)
+        payload = late_round_game_payload(
+            fp,
+            matched_rounds=matched_rounds,
+            round_cards=round_cards,
+        )
         payload["round_n"] = round_n
-        payload["round_cards"] = list(round_cards) if round_cards else []
+        stage_cards = draw_round_cards(fp.draw_cards, round_n)
+        payload["round_cards"] = list(stage_cards) if stage_cards else []
         games.append(payload)
         if fp.winner_suit:
             winners[fp.winner_suit.title()] = winners.get(fp.winner_suit.title(), 0) + 1
@@ -225,8 +293,17 @@ def _late_round_focus_payload(
         "ready": bool(games),
         "stage": f"r{round_n}",
         "round_n": round_n,
+        "matched_rounds": list(matched_rounds),
         "live_game_id": live_game_id,
         "live_round_cards": live_round_cards,
+        "round_cards": [
+            {
+                "round_n": rn,
+                "cards": styled_cards(cards),
+                "codes": list(cards),
+            }
+            for rn, cards in shared_round_cards
+        ],
         "games": games,
         "game_ids": [g["game_id"] for g in games],
         "winner_counts": winner_counts,

@@ -175,16 +175,19 @@ def test_similar_and_stats_api(tmp_path: Path):
     similar = client.get("/api/similar").json()
     assert "corpus_n" in similar
     assert "clusters" in similar
+    assert similar.get("mode") == "late_rounds"
     assert "late_round_stats" in similar
     late_stats = client.get("/api/similar/late-stats").json()
     assert "stages" in late_stats
     late = client.get("/api/similar/late?stage=r3&ids=100").json()
     assert late["round_n"] == 3
+    assert late["matched_rounds"] == [3]
     page = client.get("/similar")
     assert page.status_code == 200
     assert "Similar" in page.text
     assert "data-late-focus" in page.text
     assert "data-late-stats" in page.text
+    assert "data-exact-only" not in page.text
     history = client.get("/history")
     assert history.status_code == 200
     hist = client.get("/api/history/100").json()
@@ -199,9 +202,13 @@ def test_similar_and_stats_api(tmp_path: Path):
     alerts = client.get("/api/alerts").json()
     assert "latest" in alerts
     assert "enabled" in alerts
+    assert alerts.get("mode") == "similarity"
+    if alerts["latest"] is not None:
+        assert str(alerts["latest"].get("kind", "")).startswith("twin-r")
     page = client.get("/")
     assert 'data-alert-bell' in page.text
     assert "/static/alerts.js" in page.text
+    assert "Similarity twins" in page.text
     assert "data-alert-dock" not in page.text
     assert "alert-banner" not in page.text
 

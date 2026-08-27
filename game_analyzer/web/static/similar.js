@@ -8,7 +8,6 @@
   const kindBanner = document.querySelector("[data-sim-kind]");
   const loading = document.querySelector("[data-sim-loading]");
   const empty = document.querySelector("[data-sim-empty]");
-  const exactOnly = document.querySelector("[data-exact-only]");
   const refreshBtn = document.querySelector("[data-sim-refresh]");
   const lightbox = document.getElementById("lightbox");
   const lightboxImg = lightbox ? lightbox.querySelector("img") : null;
@@ -40,11 +39,6 @@
     document.body.classList.remove("no-scroll");
   }
 
-  function sharedFromKey(key) {
-    if (!key || key.indexOf("shared=") < 0) return null;
-    return key.split("shared=").pop();
-  }
-
   function queryParams() {
     return new URLSearchParams(window.location.search || "");
   }
@@ -56,36 +50,11 @@
       kindBanner.textContent = "";
       return;
     }
-    const sharedMin = data.near_shared_min != null ? data.near_shared_min : 9;
-    const nearNote =
-      "near = ≥" +
-      sharedMin +
-      "/12 handicap · browse only (not a bet signal)";
-    if (data.exact_n > 0 && data.near_n > 0) {
-      kindBanner.textContent =
-        "EXACT + NEAR · " +
-        data.exact_n +
-        " exact · " +
-        (data.near_same_n || 0) +
-        " near same-winner · " +
-        (data.near_mixed_n || 0) +
-        " near mixed · " +
-        nearNote;
-      kindBanner.className = "similar-kind-banner is-mixed";
-    } else if (data.exact_n > 0) {
-      kindBanner.textContent =
-        "EXACT · " + data.exact_n + " twin set(s) with identical fingerprints";
-      kindBanner.className = "similar-kind-banner is-exact";
-    } else {
-      kindBanner.textContent =
-        "NEAR only · no exact twins · " +
-        (data.near_same_n || 0) +
-        " same-winner · " +
-        (data.near_mixed_n || 0) +
-        " mixed · " +
-        nearNote;
-      kindBanner.className = "similar-kind-banner is-near";
-    }
+    kindBanner.textContent =
+      "LATE ROUNDS · " +
+      data.cluster_count +
+      " twin set(s) with identical R3 / R3→R4 / R3→R4→R5 draws";
+    kindBanner.className = "similar-kind-banner is-exact";
     kindBanner.hidden = false;
   }
 
@@ -122,29 +91,51 @@
       .join("");
   }
 
+  function sharedRoundsHtml(cluster) {
+    const rounds = cluster.round_cards || [];
+    if (!rounds.length) return "";
+    return (
+      '<div class="cluster-shared-rounds">' +
+      rounds
+        .map(function (row) {
+          return (
+            '<div class="game-card-section"><strong>Shared R' +
+            row.round_n +
+            "</strong>" +
+            '<div class="mini-cards matched-round-cards">' +
+            cards.miniCards(row.cards) +
+            "</div></div>"
+          );
+        })
+        .join("") +
+      "</div>"
+    );
+  }
+
   function clusterDetail(cluster) {
     const bits = [];
-    if (cluster.match_pct != null) bits.push(Math.round(cluster.match_pct) + "% match");
-    bits.push((cluster.size || cluster.games.length) + " games");
-    const shared = sharedFromKey(cluster.key);
-    if (shared) bits.push(shared + "/12 cards shared");
-    else if (cluster.exact) bits.push("12/12 exact");
-    if (cluster.stage) bits.push(cluster.stage);
+    bits.push((cluster.size || (cluster.games || []).length) + " games");
+    if (cluster.matched_rounds && cluster.matched_rounds.length) {
+      bits.push(
+        "matched " +
+          cluster.matched_rounds
+            .map(function (n) {
+              return "R" + n;
+            })
+            .join("+")
+      );
+    } else if (cluster.stage) {
+      bits.push(cluster.stage);
+    }
+    if (cluster.agreement_pct != null && cluster.majority_winner) {
+      bits.push(cluster.agreement_pct + "% agree on " + cluster.majority_winner);
+    }
     return bits.join(" · ");
   }
 
   function renderCluster(cluster, index) {
     const setNum = index + 1;
-    const badgeKind = cluster.badge_kind || (cluster.exact ? "exact" : "near");
-    const badge =
-      cluster.badge ||
-      (cluster.exact
-        ? "EXACT"
-        : cluster.winners_same
-          ? "NEAR · same winners"
-          : cluster.winners_same === false
-            ? "NEAR · mixed winners · browse only"
-            : "NEAR · browse only");
+    const badge = cluster.badge || cluster.stage || "R3";
     const winnerBits = (cluster.winner_counts || [])
       .map(function (w) {
         return w[0] + "×" + w[1];
@@ -161,19 +152,17 @@
     const hostId = "shots-set-" + setNum + "-" + ids.join("-");
 
     return (
-      '<article class="similar-cluster panel is-' +
-      badgeKind +
-      '" data-set="' +
+      '<article class="similar-cluster panel is-exact" data-set="' +
       setNum +
-      '"><div class="cluster-head"><span class="sim-badge ' +
-      badgeKind +
-      '">' +
+      '"><div class="cluster-head"><span class="sim-badge exact">' +
       badge +
       '</span><h3 class="cluster-set">Set ' +
       setNum +
       '</h3></div><p class="cluster-detail">' +
       clusterDetail(cluster) +
-      '</p><p class="cluster-winners">Winners: ' +
+      "</p>" +
+      sharedRoundsHtml(cluster) +
+      '<p class="cluster-winners">Winners: ' +
       (winnerBits || "—") +
       "</p>" +
       gamesHtml +
@@ -181,7 +170,7 @@
       hostId +
       '" data-game-ids="' +
       ids.join(",") +
-      '">Show screenshots</button></div>' +
+      '">See screenshots</button></div>' +
       '<div class="similar-shots" id="' +
       hostId +
       '" hidden></div></article>'
@@ -191,44 +180,62 @@
   async function loadShots(host, gameIds) {
     host.hidden = false;
     host.innerHTML = '<p class="muted">Loading screenshots…</p>';
-    const thumbs = [];
+    const groups = [];
     for (const gid of gameIds) {
       try {
         const data = await live.get("/api/game/" + encodeURIComponent(gid));
         const frames = data.frames || [];
-        const last = frames.length ? frames[frames.length - 1] : null;
-        if (last) {
-          thumbs.push({ id: gid, url: last.url, caption: "#" + gid + " · " + last.phase });
-        } else {
-          thumbs.push({ id: gid, url: null, caption: "#" + gid });
-        }
+        groups.push({
+          id: gid,
+          frames: frames.map(function (f) {
+            return {
+              url: f.url,
+              caption: "#" + gid + " · " + (f.phase || "frame"),
+            };
+          }),
+        });
       } catch (_e) {
-        thumbs.push({ id: gid, url: null, caption: "#" + gid });
+        groups.push({ id: gid, frames: [] });
       }
     }
     host.innerHTML =
-      '<div class="similar-shot-row">' +
-      thumbs
-        .map(function (t) {
-          if (!t.url) {
-            return '<div class="shot-missing">#' + t.id + "<br>no screenshot</div>";
+      groups
+        .map(function (g) {
+          if (!g.frames.length) {
+            return (
+              '<div class="similar-shot-game"><h4 class="shot-game-title">#' +
+              g.id +
+              '</h4><div class="shot-missing">no screenshots</div></div>'
+            );
           }
           return (
-            '<button type="button" class="shot-thumb" data-shot-url="' +
-            t.url +
-            '" data-shot-cap="' +
-            t.caption +
-            '"><img src="' +
-            t.url +
-            '" alt="' +
-            t.caption +
-            '" loading="lazy" /><span>' +
-            t.caption +
-            "</span></button>"
+            '<div class="similar-shot-game"><h4 class="shot-game-title">#' +
+            g.id +
+            " · " +
+            g.frames.length +
+            ' shot(s)</h4><div class="similar-shot-row">' +
+            g.frames
+              .map(function (t) {
+                return (
+                  '<button type="button" class="shot-thumb" data-shot-url="' +
+                  t.url +
+                  '" data-shot-cap="' +
+                  t.caption +
+                  '"><img src="' +
+                  t.url +
+                  '" alt="' +
+                  t.caption +
+                  '" loading="lazy" /><span>' +
+                  t.caption +
+                  "</span></button>"
+                );
+              })
+              .join("") +
+            "</div></div>"
           );
         })
         .join("") +
-      '</div><p class="muted">Tap a screenshot for full view.</p>';
+      '<p class="muted">Tap a screenshot for full view.</p>';
     host.querySelectorAll("[data-shot-url]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         openLightbox(btn.getAttribute("data-shot-url"), btn.getAttribute("data-shot-cap"));
@@ -289,10 +296,20 @@
           (data.live_game_id ? " · live #" + data.live_game_id : "");
       }
       const roundCards = (data.live_round_cards || []).join(", ") || "—";
+      const matched =
+        data.matched_rounds && data.matched_rounds.length
+          ? data.matched_rounds
+              .map(function (n) {
+                return "R" + n;
+              })
+              .join("+")
+          : "R" + roundN;
       if (lateDetail) {
         lateDetail.textContent =
           data.match_count +
-          " game(s) · round cards [" +
+          " game(s) · " +
+          matched +
+          " · stage cards [" +
           roundCards +
           "]" +
           (data.agreement_pct != null && data.majority_winner
@@ -319,7 +336,7 @@
       }
       if (lateShotsBtn) {
         lateShotsBtn.disabled = false;
-        lateShotsBtn.textContent = "Show screenshots";
+        lateShotsBtn.textContent = "See screenshots";
       }
       lateFocus.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (_e) {
@@ -334,22 +351,22 @@
     if (kindBanner) kindBanner.hidden = true;
     summary.textContent = "Loading…";
     try {
-      const exact = exactOnly && exactOnly.checked;
-      const data = await live.get("/api/similar?exact_only=" + (exact ? "true" : "false"));
+      const data = await live.get("/api/similar");
       loading.hidden = true;
+      const r3Sets = data.r3_twin_sets != null ? data.r3_twin_sets : data.cluster_count;
+      const r3Games = data.r3_games != null ? data.r3_games : data.games_shown;
       summary.textContent =
         "scanned " +
         data.corpus_n +
-        " finished · " +
-        data.cluster_count +
-        " sets · " +
-        data.exact_n +
-        " exact · " +
-        data.near_n +
-        " near · " +
-        data.games_shown +
-        " games";
-      live.stamp(true, data.cluster_count + " sets");
+        " finished · R3 " +
+        r3Sets +
+        " twin sets · " +
+        r3Games +
+        " games" +
+        (data.cluster_count != null && data.cluster_count !== r3Sets
+          ? " · showing " + data.cluster_count + " set(s) below"
+          : "");
+      live.stamp(true, "R3 " + r3Sets + " twin sets");
       renderLateStats(data.late_round_stats || []);
       await loadLateFocusFromQuery();
       if (!data.clusters || !data.clusters.length) {
@@ -357,9 +374,7 @@
         empty.textContent =
           "Scanned " +
           data.corpus_n +
-          " finished games — no " +
-          (exact ? "exact twins" : "similar pairs") +
-          " yet.";
+          " finished games — no identical R3 / R4 / R5 twin sets yet.";
         return;
       }
       setKindBanner(data);
@@ -387,10 +402,6 @@
   refresh();
   if (refreshBtn)
     refreshBtn.addEventListener("click", function () {
-      refresh();
-    });
-  if (exactOnly)
-    exactOnly.addEventListener("change", function () {
       refresh();
     });
   if (lightbox) {

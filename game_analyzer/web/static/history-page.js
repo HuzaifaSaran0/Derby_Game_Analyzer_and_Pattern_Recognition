@@ -28,7 +28,7 @@
   function setStats(stats) {
     const el = document.querySelector("[data-sim-stats]");
     if (!el || !stats) return;
-    el.textContent = stats.late_round_text || "R3 twins —";
+    el.textContent = stats.late_round_text || "Late-round twins —";
   }
 
   function openLightbox(frames, index) {

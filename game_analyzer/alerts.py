@@ -39,6 +39,16 @@ def append_alert_log(path: Path, message: str) -> None:
         handle.write(f"{stamp}  {message}\n")
 
 
+# Legacy confidence/guess alert tags — never surface in the notification panel.
+_LEGACY_ALERT_KINDS = frozenset({"bet", "upgrade", "cancel", "alert"})
+
+
+def is_similarity_alert(kind: str) -> bool:
+    """True for late-round twin alerts (``twin-r3`` / ``twin-r4`` / ``twin-r5``)."""
+    k = (kind or "").strip().lower()
+    return k.startswith("twin-r") and k not in _LEGACY_ALERT_KINDS
+
+
 def parse_alert_log_line(line: str) -> dict[str, str] | None:
     """Parse ``{iso}  {message}`` rows from ``alerts.log``."""
     text = line.strip()
@@ -69,8 +79,17 @@ def parse_alert_log_line(line: str) -> dict[str, str] | None:
     }
 
 
-def read_recent_alerts(path: Path, *, limit: int = 20) -> list[dict[str, str]]:
-    """Newest-first alert entries from the log file (empty if missing)."""
+def read_recent_alerts(
+    path: Path,
+    *,
+    limit: int = 20,
+    similarity_only: bool = True,
+) -> list[dict[str, str]]:
+    """Newest-first alert entries from the log file (empty if missing).
+
+    By default only late-round similarity twins are returned — legacy
+    BET/UPGRADE/CANCEL confidence rows are skipped.
+    """
     if limit <= 0 or not path.is_file():
         return []
     try:
@@ -81,6 +100,8 @@ def read_recent_alerts(path: Path, *, limit: int = 20) -> list[dict[str, str]]:
     for line in reversed(lines):
         parsed = parse_alert_log_line(line)
         if parsed is None:
+            continue
+        if similarity_only and not is_similarity_alert(parsed["kind"]):
             continue
         entries.append(parsed)
         if len(entries) >= limit:

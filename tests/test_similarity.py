@@ -384,6 +384,36 @@ def test_late_round_cascade_and_stats():
     assert by_stage["R3"].same_winner_pct is not None
 
 
+def test_build_late_round_twin_sets():
+    from game_analyzer.similarity import build_late_round_twin_sets
+
+    R3 = ("9S", "8H", "7C")
+    R4 = ("6S", "5H", "4C")
+    R5 = ("3S", "2H", "AC")
+    draws_a = R1 + R2 + R3 + R4 + R5
+    draws_b = R1 + ("3C", "6D", "5S") + R3 + R4 + ("KS", "QH", "JD")
+    draws_c = R1 + R2 + R3 + ("AS", "KH", "QD")
+
+    corpus = [
+        fp
+        for fp in (
+            build_fingerprint("a", HANDICAP_A, draws_a, winner_suit="Spades"),
+            build_fingerprint("b", HANDICAP_B, draws_b, winner_suit="Spades"),
+            build_fingerprint("c", HANDICAP_NEAR, draws_c, winner_suit="Hearts"),
+        )
+        if fp is not None
+    ]
+    sets = build_late_round_twin_sets(corpus)
+    by_stage = {s.stage: s for s in sets}
+    assert "R3" in by_stage
+    assert set(g.game_id for g in by_stage["R3"].games) == {"a", "b", "c"}
+    assert by_stage["R3"].matched_rounds == (3,)
+    assert by_stage["R3"].round_cards[0][1] == R3
+    assert "R3→R4" in by_stage
+    assert set(g.game_id for g in by_stage["R3→R4"].games) == {"a", "b"}
+    assert by_stage["R3→R4"].matched_rounds == (3, 4)
+
+
 def test_store_late_round_apis(tmp_path: Path):
     store = GameStore(tmp_path / "games.sqlite")
     now = datetime(2026, 1, 1, 12, 0, 0)

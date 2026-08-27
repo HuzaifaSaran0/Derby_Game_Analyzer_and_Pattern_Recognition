@@ -13,27 +13,29 @@
     <div class="site-header-top">
       <div class="site-brand">
         <h1><a href="/">Game Analyzer</a></h1>
-        <p class="sub live-note" data-live-status>Watching laptop capture</p>
-      </div>
-      <div class="alert-bell-wrap" data-alert-wrap>
-        <button type="button" class="alert-bell-btn" data-alert-bell aria-label="Alerts" aria-expanded="false">
-          <svg class="alert-bell-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-            <path fill="currentColor" d="M12 22a2.2 2.2 0 0 0 2.2-2.2h-4.4A2.2 2.2 0 0 0 12 22zm7-6.2V11a7 7 0 0 0-5-6.7V3.5a2 2 0 1 0-4 0v.8A7 7 0 0 0 5 11v4.8L3.4 17.4A1 1 0 0 0 4.1 19h15.8a1 1 0 0 0 .7-1.6L19 15.8z"/>
-          </svg>
-          <span class="alert-bell-badge" data-alert-badge hidden></span>
-        </button>
-        <div class="alert-panel" data-alert-panel hidden>
-          <div class="alert-panel-head">
-            <strong>Alerts</strong>
-            <span class="muted" data-alert-status>Latest 5</span>
-          </div>
-          <div class="alert-panel-controls">
-            <button type="button" class="btn btn-sm" data-alert-sound>Enable sound</button>
-            <button type="button" class="btn btn-sm" data-alert-push>Enable notify</button>
-          </div>
-          <p class="alert-panel-hint muted">Sound needs one tap on mobile. Notify asks browser permission.</p>
-          <div class="alert-panel-list" data-alert-list>
-            <p class="muted">No alerts yet.</p>
+        <div class="site-status-row">
+          <p class="sub live-note" data-live-status>Watching laptop capture</p>
+          <div class="alert-bell-wrap" data-alert-wrap>
+            <button type="button" class="alert-bell-btn" data-alert-bell aria-label="Similarity twin alerts" aria-expanded="false">
+              <svg class="alert-bell-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                <path fill="currentColor" d="M12 22a2.2 2.2 0 0 0 2.2-2.2h-4.4A2.2 2.2 0 0 0 12 22zm7-6.2V11a7 7 0 0 0-5-6.7V3.5a2 2 0 1 0-4 0v.8A7 7 0 0 0 5 11v4.8L3.4 17.4A1 1 0 0 0 4.1 19h15.8a1 1 0 0 0 .7-1.6L19 15.8z"/>
+              </svg>
+              <span class="alert-bell-badge" data-alert-badge hidden></span>
+            </button>
+            <div class="alert-panel" data-alert-panel hidden>
+              <div class="alert-panel-head">
+                <strong>Similarity twins</strong>
+                <span class="muted" data-alert-status>Latest R3–R5</span>
+              </div>
+              <div class="alert-panel-controls">
+                <button type="button" class="btn btn-sm" data-alert-sound>Enable sound</button>
+                <button type="button" class="btn btn-sm" data-alert-push>Enable notify</button>
+              </div>
+              <p class="alert-panel-hint muted">Late-round matches only (R3 / R4 / R5). Tap an alert to open Similar. Sound needs one tap on mobile.</p>
+              <div class="alert-panel-list" data-alert-list>
+                <p class="muted">No similarity twins yet.</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>

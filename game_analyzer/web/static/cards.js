@@ -46,6 +46,22 @@ window.gameAnalyzerCards = {
     );
   },
 
+  matchedRoundsBlock(rounds) {
+    if (!rounds || !rounds.length) return "";
+    return rounds
+      .map(function (row) {
+        return (
+          '<div class="game-card-section"><strong>R' +
+          row.round_n +
+          " draws</strong>" +
+          '<div class="mini-cards matched-round-cards">' +
+          window.gameAnalyzerCards.miniCards(row.cards) +
+          "</div></div>"
+        );
+      })
+      .join("");
+  },
+
   gameCardBlock(game) {
     const winner = game.winner || "—";
     let html =
@@ -55,13 +71,20 @@ window.gameAnalyzerCards = {
       winner +
       '</div><div class="game-card-section"><strong>Handicap</strong>' +
       this.suitTable(game.handicap) +
-      '</div><div class="game-card-section"><strong>Draws (' +
-      (game.draw_count || 0) +
-      " cards · " +
-      (game.draw_rounds || 0) +
-      " rounds)</strong>" +
-      this.suitTable(game.draws) +
-      "</div></div>";
+      "</div>";
+    if (game.matched_rounds && game.matched_rounds.length) {
+      html += this.matchedRoundsBlock(game.matched_rounds);
+    } else {
+      html +=
+        '<div class="game-card-section"><strong>Draws (' +
+        (game.draw_count || 0) +
+        " cards · " +
+        (game.draw_rounds || 0) +
+        " rounds)</strong>" +
+        this.suitTable(game.draws) +
+        "</div>";
+    }
+    html += "</div>";
     return html;
   },
 
