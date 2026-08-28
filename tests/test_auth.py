@@ -130,3 +130,10 @@ def test_logout(auth_client: TestClient):
     assert response.status_code == 302
     assert response.headers["location"] == "/login"
     assert auth_client.get("/history", follow_redirects=False).status_code == 302
+
+
+def test_data_page_requires_login(auth_client: TestClient):
+    response = auth_client.get("/data", follow_redirects=False)
+    assert response.status_code == 302
+    assert "/login" in response.headers["location"]
+    assert auth_client.get("/api/data/status").status_code == 401

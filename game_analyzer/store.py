@@ -177,10 +177,14 @@ def _dumps(value) -> str:
 
 class GameStore:
     def __init__(self, path: Path | None = None, root: Path | None = None) -> None:
+        from game_analyzer.similarity_cache import DEFAULT_CACHE_PATH
+
         self.path = path or DEFAULT_DB
         self.root = root or ROOT
+        self.similarity_cache_path = DEFAULT_CACHE_PATH
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._similarity_corpus_cache: tuple[bool, tuple] | None = None
+        self._late_round_stats_cache: list | None = None
         with self._connect() as con:
             con.executescript(_SCHEMA)
             self._ensure_guess_columns(con)
@@ -212,7 +216,7 @@ class GameStore:
     ) -> None:
         if not decision.recording or not decision.should_save:
             return
-        self._similarity_corpus_cache = None
+        self.invalidate_similarity_cache()
         game_id = decision.game_id or decision.session_id
         if not game_id:
             return
@@ -329,7 +333,7 @@ class GameStore:
                 con.execute("DELETE FROM frames WHERE game_id=?", (gid,))
                 con.execute("DELETE FROM games WHERE game_id=?", (gid,))
                 deleted += 1
-        self._similarity_corpus_cache = None
+        self.invalidate_similarity_cache()
         return deleted
 
     def get_game(self, game_id: str, root: Path | None = None) -> StoredGame | None:
@@ -488,7 +492,82 @@ class GameStore:
         return build_clusters(self.similarity_corpus(), exact_only=exact_only)
 
     def invalidate_similarity_cache(self) -> None:
+        from game_analyzer.similarity_cache import invalidate_cache
+
         self._similarity_corpus_cache = None
+        self._late_round_stats_cache = None
+        invalidate_cache(self.similarity_cache_path)
+
+    def rebuild_similarity_cache(
+        self,
+        *,
+        max_round: int = 5,
+        min_round: int = 3,
+    ) -> dict:
+        """Force-rebuild persisted twin-set cache (export/import warm-up)."""
+        from game_analyzer.similarity_cache import rebuild_cache
+
+        self._late_round_stats_cache = None
+        corpus = self.similarity_corpus()
+        return rebuild_cache(
+            corpus,
+            self.similarity_cache_path,
+            max_round=max_round,
+            min_round=min_round,
+        )
+
+    def similarity_cache_status(self) -> dict:
+        from game_analyzer.similarity_cache import cache_status
+
+        return cache_status(self.similarity_cache_path)
+
+    def _late_round_partitioned_cached(
+        self,
+        *,
+        max_round: int = 5,
+        min_round: int = 3,
+    ):
+        from game_analyzer.similarity import (
+            build_late_round_twin_sets,
+            late_round_corpus_stats,
+            partition_late_round_twin_sets,
+        )
+        from game_analyzer.similarity_cache import (
+            load_partitioned_twin_sets,
+            rebuild_cache,
+        )
+
+        corpus = self.similarity_corpus()
+        loaded = load_partitioned_twin_sets(
+            corpus,
+            self.similarity_cache_path,
+            max_round=max_round,
+            min_round=min_round,
+        )
+        if loaded is None:
+            rebuild_cache(
+                corpus,
+                self.similarity_cache_path,
+                max_round=max_round,
+                min_round=min_round,
+            )
+            loaded = load_partitioned_twin_sets(
+                corpus,
+                self.similarity_cache_path,
+                max_round=max_round,
+                min_round=min_round,
+            )
+        if loaded is not None:
+            trusted, weak, stats = loaded
+            self._late_round_stats_cache = stats
+            return trusted, weak
+        all_sets = build_late_round_twin_sets(
+            corpus, max_round=max_round, min_round=min_round
+        )
+        self._late_round_stats_cache = late_round_corpus_stats(
+            corpus, max_round=max_round
+        )
+        return partition_late_round_twin_sets(all_sets)
 
     def find_similar_to(
         self,
@@ -573,6 +652,11 @@ class GameStore:
     def late_round_stats(self, *, max_round: int = 5):
         from game_analyzer.similarity import late_round_corpus_stats
 
+        if self._late_round_stats_cache is not None:
+            return list(self._late_round_stats_cache)
+        self._late_round_partitioned_cached(max_round=max_round)
+        if self._late_round_stats_cache is not None:
+            return list(self._late_round_stats_cache)
         return late_round_corpus_stats(self.similarity_corpus(), max_round=max_round)
 
     def late_round_twin_sets(
@@ -582,20 +666,12 @@ class GameStore:
         min_round: int = 3,
         production_only: bool = True,
     ):
-        from game_analyzer.similarity import (
-            build_late_round_twin_sets,
-            partition_late_round_twin_sets,
-        )
-
-        all_sets = build_late_round_twin_sets(
-            self.similarity_corpus(),
-            max_round=max_round,
-            min_round=min_round,
+        trusted, weak = self._late_round_partitioned_cached(
+            max_round=max_round, min_round=min_round
         )
         if production_only:
-            trusted, _weak = partition_late_round_twin_sets(all_sets)
             return trusted
-        return all_sets
+        return trusted + weak
 
     def late_round_twin_sets_partitioned(
         self,
@@ -604,17 +680,7 @@ class GameStore:
         min_round: int = 3,
     ):
         """Return (production-safe sets, excluded weak sets)."""
-        from game_analyzer.similarity import (
-            build_late_round_twin_sets,
-            partition_late_round_twin_sets,
-        )
-
-        all_sets = build_late_round_twin_sets(
-            self.similarity_corpus(),
-            max_round=max_round,
-            min_round=min_round,
-        )
-        return partition_late_round_twin_sets(all_sets)
+        return self._late_round_partitioned_cached(max_round=max_round, min_round=min_round)
 
     def pre_race_outcome_for(self, game_id: str) -> PreRaceOutcome | None:
         game = self.get_game(game_id)

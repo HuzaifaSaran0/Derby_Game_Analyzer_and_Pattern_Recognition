@@ -5,6 +5,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -15,6 +16,13 @@ from game_analyzer.alerts import (
     read_recent_alerts,
 )
 from game_analyzer.config import load_config
+from game_analyzer.data_transfer import (
+    MAX_IMPORT_BYTES,
+    build_export_zip,
+    data_summary,
+    export_filename,
+    import_from_zip,
+)
 from game_analyzer.similarity import NEAR_SHARED_MIN, draw_round_cards, friendly_late_round_summary
 from game_analyzer.store import GameStore
 from game_analyzer.web.auth import (
@@ -41,7 +49,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "31"
+STATIC_VER = "32"
 
 
 def _is_public_path(path: str, method: str) -> bool:
@@ -624,6 +632,79 @@ def create_app(
             name="similar.html",
             context=_ctx(request, active="similar"),
         )
+
+    @app.get("/data", response_class=HTMLResponse)
+    def data_page(request: Request):
+        return templates.TemplateResponse(
+            request=request,
+            name="data.html",
+            context=_ctx(request, active="data"),
+        )
+
+    @app.get("/api/data/status")
+    def api_data_status():
+        summary = data_summary(store)
+        return JSONResponse(
+            {
+                "games": summary.games,
+                "frames": summary.frames,
+                "finished_games": summary.finished_games,
+                "screenshot_files": summary.screenshot_files,
+                "screenshot_bytes": summary.screenshot_bytes,
+                "cache_present": summary.cache_present,
+                "cache_built_at": summary.cache_built_at,
+                "trusted_twin_sets": summary.trusted_twin_sets,
+            },
+            headers=NO_CACHE,
+        )
+
+    @app.get("/api/data/export")
+    def api_data_export():
+        import tempfile
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+        path = Path(tmp.name)
+        tmp.close()
+        try:
+            build_export_zip(store, path)
+        except OSError as exc:
+            path.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        fname = export_filename()
+        return FileResponse(
+            path,
+            media_type="application/zip",
+            filename=fname,
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+            background=BackgroundTask(lambda: path.unlink(missing_ok=True)),
+        )
+
+    @app.post("/api/data/import")
+    async def api_data_import(request: Request):
+        import tempfile
+
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > MAX_IMPORT_BYTES:
+                    raise HTTPException(status_code=413, detail="Backup file too large.")
+            except ValueError:
+                pass
+        body = await request.body()
+        if len(body) > MAX_IMPORT_BYTES:
+            raise HTTPException(status_code=413, detail="Backup file too large.")
+        if not body:
+            raise HTTPException(status_code=400, detail="Empty upload.")
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+        path = Path(tmp.name)
+        try:
+            tmp.write(body)
+            tmp.close()
+            report = import_from_zip(store, path, merge=True)
+        finally:
+            path.unlink(missing_ok=True)
+        status = 200 if report.ok else 400
+        return JSONResponse(report.to_dict(), status_code=status, headers=NO_CACHE)
 
     @app.get("/games.json")
     def games_json():

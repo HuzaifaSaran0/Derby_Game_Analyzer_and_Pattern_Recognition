@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Data · Game Analyzer{% endblock %}
+{% block page %}data{% endblock %}
+
+{% block content %}
+<section class="panel data-page">
+  <h2 class="section-title">Backup &amp; restore</h2>
+  <p class="muted">
+    Export your game database, screenshots, and twin-set cache for moving to another server.
+    Import merges new games only — existing game IDs are left unchanged.
+  </p>
+
+  <div class="data-stats" data-data-stats>
+    <p class="muted">Loading current data summary…</p>
+  </div>
+
+  <div class="data-actions">
+    <div class="data-action-card">
+      <h3>Export</h3>
+      <p class="muted">Download one zip file with everything needed to restore on another machine.</p>
+      <button type="button" class="btn" data-data-export>Download backup</button>
+      <p class="data-hint muted" data-export-status hidden></p>
+    </div>
+
+    <div class="data-action-card">
+      <h3>Import</h3>
+      <p class="muted">Upload a backup zip from this or another Game Analyzer install.</p>
+      <label class="data-file-label">
+        <span>Choose backup file</span>
+        <input type="file" accept=".zip,application/zip" data-data-file />
+      </label>
+      <button type="button" class="btn btn-secondary" data-data-import disabled>Import backup</button>
+      <p class="data-hint muted" data-import-status hidden></p>
+    </div>
+  </div>
+
+  <div class="data-note">
+    <p class="muted"><strong>Included:</strong> game database, live screenshots, precomputed twin cache.</p>
+    <p class="muted"><strong>Not included:</strong> login password, session secret, capture config.</p>
+    <p class="muted">Stop live capture on both machines during import if possible.</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/data.js?v={{ static_ver }}"></script>
+{% endblock %}

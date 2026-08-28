@@ -13,6 +13,7 @@ data/*.sqlite-wal
 data/*.sqlite-shm
 data/web_auth.json
 data/session_secret
+data/similarity_cache.json
 
 # Full game screenshots — keep locally, do not publish
 fixtures/live/

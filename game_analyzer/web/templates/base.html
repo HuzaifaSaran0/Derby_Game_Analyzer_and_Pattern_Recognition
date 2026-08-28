@@ -45,6 +45,7 @@
       <a class="nav-link{% if active == 'history' %} on{% endif %}" href="/history">History</a>
       <a class="nav-link{% if active == 'similar' %} on{% endif %}" href="/similar">Similar</a>
       {% if logged_in %}
+      <a class="nav-link{% if active == 'data' %} on{% endif %}" href="/data">Data</a>
       <a class="nav-link{% if active == 'account' %} on{% endif %}" href="/change-password">Change password</a>
       <form class="nav-logout" method="post" action="/logout">
         <button type="submit" class="nav-link nav-logout-btn">Sign out</button>
