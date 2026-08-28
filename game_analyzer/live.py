@@ -14,6 +14,7 @@ import argparse
 import os
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -52,6 +53,15 @@ _FRAME_GRABBED_AT: float | None = None
 _LATE_ROUND_GAME_ID: str | None = None
 _LATE_ROUND_ALERTED: set[str] = set()
 _LAST_LATE_SIGNALS: dict[int, object] = {}
+_RETAKE_PREVIEW_HOOK: Callable[[Path, object, str | None], None] | None = None
+
+
+def set_retake_preview_hook(
+    hook: Callable[[Path, object, str | None], None] | None,
+) -> None:
+    """Optional UI callback after a lay/back retake replaces the saved PNG (timer thread)."""
+    global _RETAKE_PREVIEW_HOOK
+    _RETAKE_PREVIEW_HOOK = hook
 
 
 def _timing_from_config(config: dict) -> RoundTiming:
@@ -180,6 +190,12 @@ def retake_screenshot_for_lay_back(
         tmp = path.with_name(path.stem + "_retake.png")
         write(tmp, frame)
         os.replace(tmp, path)
+        hook = _RETAKE_PREVIEW_HOOK
+        if hook is not None:
+            try:
+                hook(path, frame, game_id)
+            except Exception:
+                pass
         return True
     except Exception:
         return False

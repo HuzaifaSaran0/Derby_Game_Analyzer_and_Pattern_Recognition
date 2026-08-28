@@ -743,6 +743,9 @@ class DemoApp(ctk.CTk):
     def start_loop(self) -> None:
         if self.looping:
             return
+        from game_analyzer.live import set_retake_preview_hook
+
+        set_retake_preview_hook(self._on_retake_preview)
         self._show_live_workspace()
         region = self.config_data["capture"]
         wait = float(region.get("delay_seconds", 5))
@@ -764,6 +767,9 @@ class DemoApp(ctk.CTk):
         self.after_id = self.after(int(wait * 1000), self._loop_tick)
 
     def stop_loop(self) -> None:
+        from game_analyzer.live import set_retake_preview_hook
+
+        set_retake_preview_hook(None)
         self.looping = False
         if self.after_id is not None:
             self.after_cancel(self.after_id)
@@ -804,6 +810,21 @@ class DemoApp(ctk.CTk):
             self.result_session.configure(text=self.last_session_text)
         self._refresh_guess_stats()
         self.after_id = self.after(int(decision.next_wait_seconds * 1000), self._loop_tick)
+
+    def _on_retake_preview(self, path: Path, frame, game_id: str | None) -> None:
+        """Lay/back retake finished — refresh preview on the UI thread (analysis already saved)."""
+        rel = f"{path.parent.name}/{path.name}"
+
+        def _ui() -> None:
+            if not self.looping:
+                return
+            self.show_frame(
+                frame,
+                f"{rel} · lay/back",
+                table_cards=self.last_table_cards,
+            )
+
+        self.after(0, _ui)
 
     def show_frame(
         self,

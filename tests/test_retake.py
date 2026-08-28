@@ -81,3 +81,22 @@ def test_retake_survives_grab_failure(tmp_path: Path):
     fakes["grab"] = boom
     assert retake_screenshot_for_lay_back(CONFIG, path, "123", **fakes) is False
     assert path.read_bytes() == b"original"
+
+
+def test_retake_preview_hook(tmp_path: Path):
+    from game_analyzer.live import set_retake_preview_hook
+
+    path, fakes = _fakes(tmp_path)
+    seen: list[tuple] = []
+
+    def hook(p, frame, gid):
+        seen.append((p, frame, gid))
+
+    set_retake_preview_hook(hook)
+    try:
+        assert retake_screenshot_for_lay_back(CONFIG, path, "123", **fakes) is True
+        assert len(seen) == 1
+        assert seen[0][0] == path
+        assert seen[0][2] == "123"
+    finally:
+        set_retake_preview_hook(None)

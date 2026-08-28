@@ -49,7 +49,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "33"
+STATIC_VER = "34"
 
 
 def _is_public_path(path: str, method: str) -> bool:
@@ -111,6 +111,23 @@ def _neighbors(game_ids: list[str], game_id: str) -> tuple[str | None, str | Non
     return prev_id, next_id
 
 
+def _shot_cache_token(screenshot_path: Path, captured_at: str) -> str:
+    """Cache-bust shot URLs when a lay/back retake replaces the PNG in place."""
+    try:
+        full = screenshot_path.resolve()
+        if full.is_file():
+            stat = full.stat()
+            return f"{captured_at}-{stat.st_mtime_ns}"
+    except OSError:
+        pass
+    return captured_at
+
+
+def _shot_url(game_id: str, seq: int, screenshot_path: Path, captured_at: str) -> str:
+    token = _shot_cache_token(screenshot_path, captured_at)
+    return f"/shot/{game_id}/{seq}?t={token}"
+
+
 def _winner_label(winner_suit: str | None) -> str:
     return winner_suit.title() if winner_suit else "none yet"
 
@@ -138,7 +155,7 @@ def _game_payload(store: GameStore, game_id: str, *, include_frames: bool = True
             "seq": frame.seq,
             "phase": frame.phase,
             "captured_at": frame.captured_at,
-            "url": f"/shot/{game.game_id}/{frame.seq}?t={frame.captured_at}",
+            "url": _shot_url(game.game_id, frame.seq, frame.screenshot_path, frame.captured_at),
         }
         for frame in game.frames
     ]
@@ -153,7 +170,7 @@ def _game_payload(store: GameStore, game_id: str, *, include_frames: bool = True
         "shot_count": len(frames),
         "frames": frames if include_frames else [],
         "preview_url": (
-            f"/shot/{game.game_id}/{latest_frame.seq}?t={latest_frame.captured_at}"
+            _shot_url(game.game_id, latest_frame.seq, latest_frame.screenshot_path, latest_frame.captured_at)
             if latest_frame and include_frames
             else None
         ),

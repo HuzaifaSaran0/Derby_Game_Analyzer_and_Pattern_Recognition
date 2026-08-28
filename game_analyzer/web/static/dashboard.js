@@ -63,6 +63,7 @@
         frames: data.frames && data.frames.length,
         table: data.table,
         ready: data.ready,
+        preview: data.preview_url,
       });
       live.stamp(true, data.ready ? "game " + data.game_id : "waiting");
       if (sig === lastSig) return;
