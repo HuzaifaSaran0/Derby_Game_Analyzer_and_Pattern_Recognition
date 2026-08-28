@@ -119,12 +119,23 @@ def late_round_game_payload(
     """Handicap + only the late rounds that matched (not full draw history)."""
     from game_analyzer.similarity import GameFingerprint, draw_round_cards
 
+    del round_cards  # per-game slices only (never shared sample cards)
     assert isinstance(fp, GameFingerprint)
     winner = fp.winner_suit.title() if fp.winner_suit else None
+    frame_r3 = draw_round_cards(fp.frame_draws, 3) if fp.frame_draws else None
+    chosen_r3 = draw_round_cards(fp.draw_cards, 3)
+    frame_verified = (
+        bool(fp.frame_draws)
+        and frame_r3 is not None
+        and chosen_r3 is not None
+        and frame_r3 == chosen_r3
+    )
     return {
         "game_id": fp.game_id,
         "winner": winner,
         "handicap": handicap_table(fp.handicap_cards),
+        "draw_source": fp.draw_source,
+        "frame_verified": frame_verified,
         "matched_rounds": [
             {
                 "round_n": rn,

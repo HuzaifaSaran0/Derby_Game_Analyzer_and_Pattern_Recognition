@@ -133,9 +133,28 @@
     return bits.join(" · ");
   }
 
+  function trustLabel(cluster) {
+    const trust = (cluster.trust || "verified").toLowerCase();
+    if (trust === "verified") return "Frame-verified";
+    if (trust === "fallback") return "Json/guess fallback";
+    return "Unverified";
+  }
+
+  function trustClass(cluster) {
+    const trust = (cluster.trust || "verified").toLowerCase();
+    if (trust === "verified") return "is-verified";
+    if (trust === "fallback") return "is-fallback";
+    return "is-weak";
+  }
+
   function renderCluster(cluster, index) {
     const setNum = index + 1;
     const badge = cluster.badge || cluster.stage || "R3";
+    const trust = trustClass(cluster);
+    const trustNote =
+      cluster.trust_notes && cluster.trust_notes.length
+        ? '<p class="cluster-trust-note muted">' + cluster.trust_notes.join(" · ") + "</p>"
+        : "";
     const winnerBits = (cluster.winner_counts || [])
       .map(function (w) {
         return w[0] + "×" + w[1];
@@ -152,15 +171,22 @@
     const hostId = "shots-set-" + setNum + "-" + ids.join("-");
 
     return (
-      '<article class="similar-cluster panel is-exact" data-set="' +
+      '<article class="similar-cluster panel is-exact ' +
+      trust +
+      '" data-set="' +
       setNum +
       '"><div class="cluster-head"><span class="sim-badge exact">' +
       badge +
+      '</span><span class="sim-badge trust ' +
+      trust +
+      '">' +
+      trustLabel(cluster) +
       '</span><h3 class="cluster-set">Set ' +
       setNum +
       '</h3></div><p class="cluster-detail">' +
       clusterDetail(cluster) +
       "</p>" +
+      trustNote +
       sharedRoundsHtml(cluster) +
       '<p class="cluster-winners">Winners: ' +
       (winnerBits || "—") +
@@ -355,18 +381,26 @@
       loading.hidden = true;
       const r3Sets = data.r3_twin_sets != null ? data.r3_twin_sets : data.cluster_count;
       const r3Games = data.r3_games != null ? data.r3_games : data.games_shown;
+      const verified = data.verified_sets != null ? data.verified_sets : 0;
+      const fallback = data.fallback_sets != null ? data.fallback_sets : 0;
+      const excluded = data.excluded_weak_sets != null ? data.excluded_weak_sets : 0;
       summary.textContent =
         "scanned " +
         data.corpus_n +
-        " finished · R3 " +
+        " finished · showing " +
+        data.cluster_count +
+        " twin sets (" +
+        verified +
+        " frame-verified" +
+        (fallback ? ", " + fallback + " fallback" : "") +
+        ")" +
+        (excluded ? " · " + excluded + " weak excluded" : "") +
+        " · R3 corpus " +
         r3Sets +
-        " twin sets · " +
+        " sets / " +
         r3Games +
-        " games" +
-        (data.cluster_count != null && data.cluster_count !== r3Sets
-          ? " · showing " + data.cluster_count + " set(s) below"
-          : "");
-      live.stamp(true, "R3 " + r3Sets + " twin sets");
+        " games";
+      live.stamp(true, verified + " verified · " + data.cluster_count + " sets");
       renderLateStats(data.late_round_stats || []);
       await loadLateFocusFromQuery();
       if (!data.clusters || !data.clusters.length) {

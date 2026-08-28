@@ -28,7 +28,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "25"
+STATIC_VER = "26"
 
 
 def _neighbors(game_ids: list[str], game_id: str) -> tuple[str | None, str | None]:
@@ -139,11 +139,52 @@ def _alerts_payload(*, limit: int = 10) -> dict:
     }
 
 
+def _twin_set_payload(twin_set) -> dict:
+    return {
+        "headline": (
+            f"{twin_set.stage} exact · {twin_set.size} games"
+            + (
+                f" · {twin_set.agreement_pct:.0f}% agree on {twin_set.majority_winner}"
+                if twin_set.agreement_pct is not None and twin_set.majority_winner
+                else ""
+            )
+        ),
+        "badge": twin_set.stage,
+        "badge_kind": "exact",
+        "key": twin_set.key,
+        "exact": True,
+        "stage": twin_set.stage,
+        "round_n": twin_set.round_n,
+        "matched_rounds": list(twin_set.matched_rounds),
+        "match_pct": 100.0,
+        "size": twin_set.size,
+        "winners_same": twin_set.winners_same,
+        "winner_counts": list(twin_set.winner_counts),
+        "majority_winner": twin_set.majority_winner,
+        "agreement_pct": twin_set.agreement_pct,
+        "trust": twin_set.trust,
+        "trust_notes": list(twin_set.trust_notes),
+        "round_cards": [
+            {
+                "round_n": rn,
+                "cards": styled_cards(cards),
+                "codes": list(cards),
+            }
+            for rn, cards in twin_set.round_cards
+        ],
+        "games": [
+            late_round_game_payload(g, matched_rounds=twin_set.matched_rounds)
+            for g in twin_set.games
+        ],
+        "game_ids": [g.game_id for g in twin_set.games],
+    }
+
+
 def _similar_payload(store: GameStore, *, exact_only: bool = False) -> dict:
     """Similar page: late-round (R3/R4/R5) twin sets only."""
     del exact_only  # kept for URL compat; handicap near/exact browse removed
     corpus = store.similarity_corpus()
-    twin_sets = store.late_round_twin_sets()
+    twin_sets, excluded = store.late_round_twin_sets_partitioned()
     late_stats_raw = store.late_round_stats()
     late_stats = [
         {
@@ -160,6 +201,8 @@ def _similar_payload(store: GameStore, *, exact_only: bool = False) -> dict:
     # Headline counts must match the accuracy cards (same late_round_stats source).
     r3 = next((s for s in late_stats_raw if s.round_n == 3), None)
     games = {g.game_id for s in twin_sets for g in s.games}
+    verified_n = sum(1 for s in twin_sets if s.trust == "verified")
+    fallback_n = sum(1 for s in twin_sets if s.trust == "fallback")
     return {
         "corpus_n": len(corpus),
         "cluster_count": len(twin_sets),
@@ -171,51 +214,14 @@ def _similar_payload(store: GameStore, *, exact_only: bool = False) -> dict:
         "games_shown": len(games),
         "r3_twin_sets": r3.twin_sets if r3 else 0,
         "r3_games": r3.games_in_sets if r3 else 0,
+        "trusted_sets": len(twin_sets),
+        "verified_sets": verified_n,
+        "fallback_sets": fallback_n,
+        "excluded_weak_sets": len(excluded),
         "mode": "late_rounds",
         "late_round_stats": late_stats,
-        "clusters": [
-            {
-                "headline": (
-                    f"{s.stage} exact · {s.size} games"
-                    + (
-                        f" · {s.agreement_pct:.0f}% agree on {s.majority_winner}"
-                        if s.agreement_pct is not None and s.majority_winner
-                        else ""
-                    )
-                ),
-                "badge": s.stage,
-                "badge_kind": "exact",
-                "key": s.key,
-                "exact": True,
-                "stage": s.stage,
-                "round_n": s.round_n,
-                "matched_rounds": list(s.matched_rounds),
-                "match_pct": 100.0,
-                "size": s.size,
-                "winners_same": s.winners_same,
-                "winner_counts": list(s.winner_counts),
-                "majority_winner": s.majority_winner,
-                "agreement_pct": s.agreement_pct,
-                "round_cards": [
-                    {
-                        "round_n": rn,
-                        "cards": styled_cards(cards),
-                        "codes": list(cards),
-                    }
-                    for rn, cards in s.round_cards
-                ],
-                "games": [
-                    late_round_game_payload(
-                        g,
-                        matched_rounds=s.matched_rounds,
-                        round_cards=s.round_cards,
-                    )
-                    for g in s.games
-                ],
-                "game_ids": [g.game_id for g in s.games],
-            }
-            for s in twin_sets
-        ],
+        "clusters": [_twin_set_payload(s) for s in twin_sets],
+        "excluded_clusters": [_twin_set_payload(s) for s in excluded],
     }
 
 

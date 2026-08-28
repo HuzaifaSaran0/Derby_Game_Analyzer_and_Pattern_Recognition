@@ -176,6 +176,10 @@ def test_similar_and_stats_api(tmp_path: Path):
     assert "corpus_n" in similar
     assert "clusters" in similar
     assert similar.get("mode") == "late_rounds"
+    assert "trusted_sets" in similar
+    assert "verified_sets" in similar
+    assert "excluded_weak_sets" in similar
+    assert "excluded_clusters" in similar
     assert "late_round_stats" in similar
     late_stats = client.get("/api/similar/late-stats").json()
     assert "stages" in late_stats

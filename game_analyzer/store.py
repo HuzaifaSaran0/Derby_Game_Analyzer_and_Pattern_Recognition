@@ -84,16 +84,28 @@ def _similarity_draws(
     guess: tuple[str, ...],
     from_table: tuple[str, ...],
 ) -> tuple[str, ...]:
-    """Round-ordered draws for late-round twin matching.
+    draws, _source = _similarity_draws_with_source(from_frames, raw, guess, from_table)
+    return draws
 
-    IN_PLAY frames preserve draw round order. ``draws_json`` / guess are cumulative
-    fallbacks. Suit-table cards are grouped by suit (not round order) and must never
-    define R3/R4/R5 slices — using them caused false twin matches.
-    """
-    ordered = [c for c in (from_frames, raw, guess) if c]
-    if ordered:
-        return max(ordered, key=len)
-    return from_table
+
+def _similarity_draws_with_source(
+    from_frames: tuple[str, ...],
+    raw: tuple[str, ...],
+    guess: tuple[str, ...],
+    from_table: tuple[str, ...],
+) -> tuple[tuple[str, ...], str]:
+    """Round-ordered draws + provenance label for late-round twin trust."""
+    candidates: list[tuple[tuple[str, ...], str]] = []
+    if from_frames:
+        candidates.append((from_frames, "frames"))
+    if raw:
+        candidates.append((raw, "json"))
+    if guess:
+        candidates.append((guess, "guess"))
+    if candidates:
+        draws, source = max(candidates, key=lambda row: len(row[0]))
+        return draws, source
+    return from_table, "table"
 
 
 def _draws_beyond_handicap(
@@ -454,12 +466,16 @@ class GameStore:
             )
             table = json.loads(row["table_json"] or "[]")
             from_table = _draws_beyond_handicap(handicap, table)
-            draws = _similarity_draws(from_frames, raw, guess, from_table)
+            draws, draw_source = _similarity_draws_with_source(
+                from_frames, raw, guess, from_table
+            )
             fp = build_fingerprint(
                 row["game_id"],
                 handicap,
                 draws,
                 winner_suit=winner,
+                draw_source=draw_source,
+                frame_draws=from_frames,
             )
             if fp is not None:
                 corpus.append(fp)
@@ -557,14 +573,46 @@ class GameStore:
 
         return late_round_corpus_stats(self.similarity_corpus(), max_round=max_round)
 
-    def late_round_twin_sets(self, *, max_round: int = 5, min_round: int = 3):
-        from game_analyzer.similarity import build_late_round_twin_sets
+    def late_round_twin_sets(
+        self,
+        *,
+        max_round: int = 5,
+        min_round: int = 3,
+        production_only: bool = True,
+    ):
+        from game_analyzer.similarity import (
+            build_late_round_twin_sets,
+            partition_late_round_twin_sets,
+        )
 
-        return build_late_round_twin_sets(
+        all_sets = build_late_round_twin_sets(
             self.similarity_corpus(),
             max_round=max_round,
             min_round=min_round,
         )
+        if production_only:
+            trusted, _weak = partition_late_round_twin_sets(all_sets)
+            return trusted
+        return all_sets
+
+    def late_round_twin_sets_partitioned(
+        self,
+        *,
+        max_round: int = 5,
+        min_round: int = 3,
+    ):
+        """Return (production-safe sets, excluded weak sets)."""
+        from game_analyzer.similarity import (
+            build_late_round_twin_sets,
+            partition_late_round_twin_sets,
+        )
+
+        all_sets = build_late_round_twin_sets(
+            self.similarity_corpus(),
+            max_round=max_round,
+            min_round=min_round,
+        )
+        return partition_late_round_twin_sets(all_sets)
 
     def pre_race_outcome_for(self, game_id: str) -> PreRaceOutcome | None:
         game = self.get_game(game_id)

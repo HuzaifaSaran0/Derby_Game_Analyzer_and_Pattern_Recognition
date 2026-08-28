@@ -215,13 +215,15 @@ def test_store_similarity_apis(tmp_path: Path):
 
 
 def test_similarity_draws_ignores_suit_table_order():
-    from game_analyzer.store import _similarity_draws
+    from game_analyzer.store import _similarity_draws, _similarity_draws_with_source
 
     frames = ("3D", "7D", "4H", "QC", "3H", "5S", "6D", "10H", "7S")
     # Table groups by suit — same cards but wrong round order; longer than frames.
     table = ("5S", "7S", "JS", "4H", "3H", "10H", "QC", "3D", "7D", "6D", "KD")
     assert _similarity_draws(frames, (), (), table) == frames
+    assert _similarity_draws_with_source(frames, (), (), table) == (frames, "frames")
     assert _similarity_draws((), (), (), table) == table
+    assert _similarity_draws_with_source((), (), (), table)[1] == "table"
 
 
 def test_similarity_corpus_rebuilds_short_draws_json_from_frames(tmp_path: Path):

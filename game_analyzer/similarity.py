@@ -36,6 +36,9 @@ class GameFingerprint:
     handicap_set: frozenset[str]
     draw_r1_set: frozenset[str]
     draw_r2_set: frozenset[str]
+    # Provenance for late-round twin trust (Similar page / alerts).
+    draw_source: str = "unknown"
+    frame_draws: tuple[str, ...] = ()
 
     @property
     def has_r1(self) -> bool:
@@ -152,6 +155,9 @@ def build_fingerprint(
     handicap_cards: tuple[tuple[str, ...], ...],
     draw_cards: tuple[str, ...],
     winner_suit: str | None = None,
+    *,
+    draw_source: str = "unknown",
+    frame_draws: tuple[str, ...] | list[str] = (),
 ) -> GameFingerprint | None:
     rows = _normalize_handicap(handicap_cards)
     if rows is None:
@@ -159,6 +165,7 @@ def build_fingerprint(
     r1 = _draw_slice(draw_cards, 1)
     r2 = _draw_slice(draw_cards, 2)
     hc_set = frozenset(c for row in rows for c in row)
+    clean_frames = tuple(c for c in frame_draws if c and not str(c).startswith("?"))
     return GameFingerprint(
         game_id=game_id,
         winner_suit=winner_suit.title() if winner_suit else None,
@@ -170,6 +177,8 @@ def build_fingerprint(
         handicap_set=hc_set,
         draw_r1_set=frozenset(r1) if r1 else frozenset(),
         draw_r2_set=frozenset(r2) if r2 else frozenset(),
+        draw_source=draw_source,
+        frame_draws=clean_frames,
     )
 
 
@@ -499,6 +508,11 @@ def format_cluster_headline(cluster: SimilarityCluster) -> str:
 LATE_ROUND_MIN = 3
 LATE_ROUND_MAX = 5
 
+# Twin-set trust levels (Similar page / production gating).
+TRUST_VERIFIED = "verified"  # IN_PLAY frames agree with chosen draws for matched rounds
+TRUST_FALLBACK = "fallback"  # no frames to cross-check; json/guess only
+TRUST_WEAK = "weak"  # table source, frame mismatch, or key disagreement — excluded
+
 
 @dataclass(frozen=True)
 class LateRoundHit:
@@ -779,6 +793,8 @@ class LateRoundTwinSet:
     winners_same: bool | None
     # Shared cards for each matched round (same across the set).
     round_cards: tuple[tuple[int, tuple[str, ...]], ...]
+    trust: str = TRUST_VERIFIED
+    trust_notes: tuple[str, ...] = ()
 
     @property
     def size(self) -> int:
@@ -789,6 +805,67 @@ class LateRoundTwinSet:
         if not self.winner_counts:
             return None
         return self.winner_counts[0][0]
+
+    @property
+    def is_production_safe(self) -> bool:
+        return self.trust in {TRUST_VERIFIED, TRUST_FALLBACK}
+
+
+def _game_round_trust(fp: GameFingerprint, round_n: int) -> tuple[str, tuple[str, ...]]:
+    """Trust for one game at one late draw round."""
+    if fp.draw_source == "table":
+        return TRUST_WEAK, (f"#{fp.game_id}: suit-table draws (not round-ordered)",)
+    chosen = draw_round_key(fp.draw_cards, round_n)
+    if fp.frame_draws:
+        frame = draw_round_key(fp.frame_draws, round_n)
+        if frame is None:
+            note = f"#{fp.game_id}: IN_PLAY frames missing R{round_n}"
+            if fp.draw_source == "frames":
+                return TRUST_FALLBACK, (note,)
+            return TRUST_FALLBACK, (note,)
+        if chosen != frame:
+            return (
+                TRUST_WEAK,
+                (f"#{fp.game_id}: R{round_n} stored draws ≠ IN_PLAY frames",),
+            )
+        return TRUST_VERIFIED, ()
+    if fp.draw_source in {"json", "guess"}:
+        return TRUST_FALLBACK, (f"#{fp.game_id}: draw source {fp.draw_source} (no frames)",)
+    return TRUST_WEAK, (f"#{fp.game_id}: no verified round-ordered draws",)
+
+
+def assess_late_round_twin_set(twin_set: LateRoundTwinSet) -> tuple[str, tuple[str, ...]]:
+    """Return (trust_level, notes). Weak sets must not ship to production UI."""
+    notes: list[str] = []
+    levels: list[str] = []
+    for rn in twin_set.matched_rounds:
+        keys = {draw_round_key(g.draw_cards, rn) for g in twin_set.games}
+        keys.discard(None)
+        if len(keys) > 1:
+            return TRUST_WEAK, ("games disagree on matched round keys",)
+        for g in twin_set.games:
+            level, game_notes = _game_round_trust(g, rn)
+            levels.append(level)
+            notes.extend(game_notes)
+    if TRUST_WEAK in levels:
+        return TRUST_WEAK, tuple(dict.fromkeys(notes))
+    if all(level == TRUST_VERIFIED for level in levels):
+        return TRUST_VERIFIED, ()
+    return TRUST_FALLBACK, tuple(dict.fromkeys(notes))
+
+
+def partition_late_round_twin_sets(
+    sets: list[LateRoundTwinSet],
+) -> tuple[list[LateRoundTwinSet], list[LateRoundTwinSet]]:
+    """Split trusted (verified/fallback) vs weak (production-excluded)."""
+    trusted: list[LateRoundTwinSet] = []
+    weak: list[LateRoundTwinSet] = []
+    for twin_set in sets:
+        if twin_set.is_production_safe:
+            trusted.append(twin_set)
+        else:
+            weak.append(twin_set)
+    return trusted, weak
 
 
 def build_late_round_twin_sets(
@@ -837,17 +914,31 @@ def build_late_round_twin_sets(
             if len(round_cards) != len(matched_rounds):
                 continue
             winners, agreement, same = _winner_stats(games)
+            candidate = LateRoundTwinSet(
+                stage=stage,
+                round_n=through,
+                matched_rounds=matched_rounds,
+                key=key,
+                games=tuple(sorted(games, key=lambda g: g.game_id)),
+                winner_counts=winners,
+                agreement_pct=agreement,
+                winners_same=same,
+                round_cards=tuple(round_cards),
+            )
+            trust, trust_notes = assess_late_round_twin_set(candidate)
             sets.append(
                 LateRoundTwinSet(
-                    stage=stage,
-                    round_n=through,
-                    matched_rounds=matched_rounds,
-                    key=key,
-                    games=tuple(sorted(games, key=lambda g: g.game_id)),
-                    winner_counts=winners,
-                    agreement_pct=agreement,
-                    winners_same=same,
-                    round_cards=tuple(round_cards),
+                    stage=candidate.stage,
+                    round_n=candidate.round_n,
+                    matched_rounds=candidate.matched_rounds,
+                    key=candidate.key,
+                    games=candidate.games,
+                    winner_counts=candidate.winner_counts,
+                    agreement_pct=candidate.agreement_pct,
+                    winners_same=candidate.winners_same,
+                    round_cards=candidate.round_cards,
+                    trust=trust,
+                    trust_notes=trust_notes,
                 )
             )
 

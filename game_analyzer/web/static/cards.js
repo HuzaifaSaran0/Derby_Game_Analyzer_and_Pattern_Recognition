@@ -64,12 +64,35 @@ window.gameAnalyzerCards = {
 
   gameCardBlock(game) {
     const winner = game.winner || "—";
+    const src = game.draw_source || "unknown";
+    let srcLabel = src;
+    let srcCls = "draw-src";
+    if (game.frame_verified) {
+      srcLabel = "frames ✓";
+      srcCls = "draw-src is-verified";
+    } else if (src === "json") {
+      srcLabel = "draws json";
+      srcCls = "draw-src is-fallback";
+    } else if (src === "guess") {
+      srcLabel = "guess draws";
+      srcCls = "draw-src is-fallback";
+    } else if (src === "table") {
+      srcLabel = "suit table";
+      srcCls = "draw-src is-weak";
+    } else if (src === "frames") {
+      srcLabel = "frames";
+      srcCls = "draw-src is-verified";
+    }
     let html =
       '<div class="game-card-block"><div class="game-card-head">#' +
       game.game_id +
       " → " +
       winner +
-      '</div><div class="game-card-section"><strong>Handicap</strong>' +
+      ' <span class="' +
+      srcCls +
+      '">' +
+      srcLabel +
+      "</span></div><div class=\"game-card-section\"><strong>Handicap</strong>" +
       this.suitTable(game.handicap) +
       "</div>";
     if (game.matched_rounds && game.matched_rounds.length) {

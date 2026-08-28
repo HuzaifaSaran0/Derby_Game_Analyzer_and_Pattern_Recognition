@@ -533,6 +533,45 @@ a { color: var(--accent); }
   margin: 8px 0 10px;
 }
 
+.cluster-trust-note {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+}
+
+.sim-badge.trust {
+  font-size: 0.72rem;
+  margin-left: 6px;
+}
+
+.sim-badge.trust.is-verified {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+}
+
+.sim-badge.trust.is-fallback {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--border));
+}
+
+.draw-src {
+  font-size: 0.72rem;
+  font-weight: 500;
+  margin-left: 6px;
+  color: var(--muted);
+}
+
+.draw-src.is-verified {
+  color: var(--success);
+}
+
+.draw-src.is-fallback {
+  color: var(--warn);
+}
+
+.draw-src.is-weak {
+  color: #ff6b6b;
+}
+
 .shot-thumb {
   border: 1px solid var(--border);
   border-radius: 8px;

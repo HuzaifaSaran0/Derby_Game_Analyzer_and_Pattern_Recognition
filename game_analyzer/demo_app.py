@@ -440,7 +440,7 @@ class DemoApp(ctk.CTk):
         r3 = next((s for s in stats if s.round_n == 3), None)
         if r3 and r3.twin_sets and r3.same_winner_pct is not None:
             label = (
-                f"Late-round similarity  ·  R3 twins {r3.twin_sets} · "
+                f"Late-round similarity  ·  Round 3 twins {r3.twin_sets} · "
                 f"same-winner {r3.same_winner_pct:.0f}%"
             )
         else:
