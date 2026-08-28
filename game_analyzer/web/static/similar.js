@@ -175,6 +175,8 @@
       trust +
       '" data-set="' +
       setNum +
+      '" data-twin-key="' +
+      (cluster.key || "").replace(/"/g, "&quot;") +
       '"><div class="cluster-head"><span class="sim-badge exact">' +
       badge +
       '</span><span class="sim-badge trust ' +
@@ -370,6 +372,19 @@
     }
   }
 
+  function focusTwinSetFromQuery() {
+    const params = queryParams();
+    const setKey = params.get("set");
+    if (!setKey) return;
+    if (window.gameAnalyzerNotifs) {
+      window.gameAnalyzerNotifs.markRead(setKey);
+    }
+    const el = document.querySelector('[data-twin-key="' + CSS.escape(setKey) + '"]');
+    if (!el) return;
+    el.classList.add("is-notif-focus");
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   async function refresh() {
     loading.hidden = false;
     empty.hidden = true;
@@ -418,6 +433,7 @@
         })
         .join("");
       bindList();
+      focusTwinSetFromQuery();
     } catch (_err) {
       loading.hidden = true;
       summary.textContent = "Failed to load — retrying…";

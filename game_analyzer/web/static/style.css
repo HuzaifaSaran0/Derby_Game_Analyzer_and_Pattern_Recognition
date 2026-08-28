@@ -153,10 +153,41 @@ a { color: var(--accent); }
   gap: 8px;
 }
 .alert-item {
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--panel-alt);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.alert-item.is-unread {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel-alt));
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+.alert-item.is-read {
+  opacity: 0.82;
+}
+.alert-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.alert-item-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.alert-item-title {
+  margin: 6px 0 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.alert-empty {
+  margin: 0;
+  padding: 8px 0;
 }
 .alert-item.is-bet {
   border-color: color-mix(in srgb, var(--success) 45%, var(--border));
@@ -690,6 +721,12 @@ a { color: var(--accent); }
   margin: 0 0 6px;
   font-size: 0.85rem;
   color: var(--muted);
+}
+
+.similar-cluster.is-notif-focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .similar-cluster.is-exact .cluster-set { color: var(--success); }

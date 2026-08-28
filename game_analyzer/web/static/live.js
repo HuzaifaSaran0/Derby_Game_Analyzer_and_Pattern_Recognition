@@ -44,3 +44,66 @@ window.gameAnalyzerLive = {
     window.addEventListener("focus", () => tick());
   },
 };
+
+window.gameAnalyzerNotifs = {
+  READ_KEY: "ga_notif_read",
+  KNOWN_KEY: "ga_notif_known",
+
+  loadRead() {
+    try {
+      const raw = localStorage.getItem(this.READ_KEY);
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      return new Set(Array.isArray(parsed) ? parsed : []);
+    } catch (_e) {
+      return new Set();
+    }
+  },
+
+  saveRead(readSet) {
+    localStorage.setItem(this.READ_KEY, JSON.stringify(Array.from(readSet)));
+  },
+
+  markRead(id) {
+    if (!id) return;
+    const read = this.loadRead();
+    read.add(id);
+    this.saveRead(read);
+    window.dispatchEvent(new CustomEvent("ganotifs:read"));
+  },
+
+  markAllRead(ids) {
+    const read = this.loadRead();
+    (ids || []).forEach(function (id) {
+      read.add(id);
+    });
+    this.saveRead(read);
+    window.dispatchEvent(new CustomEvent("ganotifs:read"));
+  },
+
+  isRead(id) {
+    return this.loadRead().has(id);
+  },
+
+  unreadCount(items) {
+    const read = this.loadRead();
+    return (items || []).filter(function (it) {
+      return it && it.id && !read.has(it.id);
+    }).length;
+  },
+
+  loadKnown() {
+    try {
+      const raw = localStorage.getItem(this.KNOWN_KEY);
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      return new Set(Array.isArray(parsed) ? parsed : []);
+    } catch (_e) {
+      return new Set();
+    }
+  },
+
+  saveKnown(ids) {
+    localStorage.setItem(this.KNOWN_KEY, JSON.stringify(Array.from(ids)));
+  },
+};

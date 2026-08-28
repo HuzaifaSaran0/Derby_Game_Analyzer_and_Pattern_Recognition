@@ -207,14 +207,17 @@ def test_similar_and_stats_api(tmp_path: Path):
     assert "latest" in alerts
     assert "enabled" in alerts
     assert alerts.get("mode") == "similarity"
-    if alerts["latest"] is not None:
-        assert str(alerts["latest"].get("kind", "")).startswith("twin-r")
+    notifications = client.get("/api/notifications").json()
+    assert "items" in notifications
+    assert "total" in notifications
+    if notifications["items"]:
+        assert notifications["items"][0].get("link", "").startswith("/similar?set=")
     page = client.get("/")
     assert 'data-alert-bell' in page.text
     assert "/static/alerts.js" in page.text
     assert "Similarity twins" in page.text
-    assert "data-alert-dock" not in page.text
-    assert "alert-banner" not in page.text
+    assert "data-alert-mark-read" in page.text
+    assert "data-alert-push" not in page.text
 
 
 def test_api_games_and_game_payload(tmp_path: Path):

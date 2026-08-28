@@ -8,6 +8,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from urllib.parse import quote
+
 from game_analyzer.alerts import (
     alert_settings_from_config,
     read_recent_alerts,
@@ -28,7 +30,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "26"
+STATIC_VER = "27"
 
 
 def _neighbors(game_ids: list[str], game_id: str) -> tuple[str | None, str | None]:
@@ -177,6 +179,37 @@ def _twin_set_payload(twin_set) -> dict:
             for g in twin_set.games
         ],
         "game_ids": [g.game_id for g in twin_set.games],
+    }
+
+
+def _notifications_payload(store: GameStore) -> dict:
+    """R3 twin sets as notification items (read/unread tracked client-side)."""
+    twin_sets, excluded = store.late_round_twin_sets_partitioned()
+    items: list[dict] = []
+    for twin_set in twin_sets:
+        if twin_set.stage != "R3":
+            continue
+        r3_cards = next((list(cards) for rn, cards in twin_set.round_cards if rn == 3), [])
+        game_ids = [g.game_id for g in twin_set.games]
+        cards_text = ", ".join(r3_cards) if r3_cards else "—"
+        ids_text = ", ".join(f"#{gid}" for gid in game_ids)
+        items.append(
+            {
+                "id": twin_set.key,
+                "kind": "twin-r3",
+                "title": f"R3 twin · {twin_set.size} games",
+                "message": f"Round 3 [{cards_text}] · {ids_text}",
+                "link": f"/similar?set={quote(twin_set.key, safe='')}",
+                "game_ids": game_ids,
+                "trust": twin_set.trust,
+                "size": twin_set.size,
+                "round_cards": r3_cards,
+            }
+        )
+    return {
+        "items": items,
+        "total": len(items),
+        "excluded_weak": len([s for s in excluded if s.stage == "R3"]),
     }
 
 
@@ -396,6 +429,10 @@ def create_app(store: GameStore | None = None) -> FastAPI:
         payload["stats"] = _stats_payload(store)
         payload["alerts"] = alerts
         return JSONResponse(payload, headers=NO_CACHE)
+
+    @app.get("/api/notifications")
+    def api_notifications():
+        return JSONResponse(_notifications_payload(store), headers=NO_CACHE)
 
     @app.get("/api/alerts")
     def api_alerts(limit: int = Query(10, ge=1, le=50)):
