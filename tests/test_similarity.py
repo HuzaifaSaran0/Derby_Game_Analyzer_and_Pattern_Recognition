@@ -214,6 +214,16 @@ def test_store_similarity_apis(tmp_path: Path):
     assert signal.suggested_winner == "Spades"
 
 
+def test_similarity_draws_ignores_suit_table_order():
+    from game_analyzer.store import _similarity_draws
+
+    frames = ("3D", "7D", "4H", "QC", "3H", "5S", "6D", "10H", "7S")
+    # Table groups by suit — same cards but wrong round order; longer than frames.
+    table = ("5S", "7S", "JS", "4H", "3H", "10H", "QC", "3D", "7D", "6D", "KD")
+    assert _similarity_draws(frames, (), (), table) == frames
+    assert _similarity_draws((), (), (), table) == table
+
+
 def test_similarity_corpus_rebuilds_short_draws_json_from_frames(tmp_path: Path):
     """Corpus must rebuild full draws from IN_PLAY frames when draws_json was overwritten short."""
     store = GameStore(tmp_path / "games.sqlite")
@@ -382,6 +392,15 @@ def test_late_round_cascade_and_stats():
     assert by_stage["R3"].twin_sets >= 1
     assert by_stage["R3→R4"].twin_sets >= 1
     assert by_stage["R3"].same_winner_pct is not None
+
+
+def test_draw_round_key_requires_exact_order():
+    from game_analyzer.similarity import draw_round_key
+
+    a = ("9S", "8H", "7C")
+    b = ("7C", "8H", "9C")  # same cards, different order
+    assert draw_round_key(a, 1) == draw_round_key(("9S", "8H", "7C"), 1)
+    assert draw_round_key(a, 1) != draw_round_key(b, 1)
 
 
 def test_build_late_round_twin_sets():

@@ -78,6 +78,24 @@ class StoredGame:
     frames: tuple[StoredFrame, ...]
 
 
+def _similarity_draws(
+    from_frames: tuple[str, ...],
+    raw: tuple[str, ...],
+    guess: tuple[str, ...],
+    from_table: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Round-ordered draws for late-round twin matching.
+
+    IN_PLAY frames preserve draw round order. ``draws_json`` / guess are cumulative
+    fallbacks. Suit-table cards are grouped by suit (not round order) and must never
+    define R3/R4/R5 slices — using them caused false twin matches.
+    """
+    ordered = [c for c in (from_frames, raw, guess) if c]
+    if ordered:
+        return max(ordered, key=len)
+    return from_table
+
+
 def _draws_beyond_handicap(
     handicap: tuple[tuple[str, ...], ...],
     table,
@@ -436,9 +454,7 @@ class GameStore:
             )
             table = json.loads(row["table_json"] or "[]")
             from_table = _draws_beyond_handicap(handicap, table)
-            # Prefer the longest accurate source. Frames are best; table fills gaps
-            # when capture missed IN_PLAY rounds but still saved the suit table.
-            draws = max((from_frames, raw, guess, from_table), key=len)
+            draws = _similarity_draws(from_frames, raw, guess, from_table)
             fp = build_fingerprint(
                 row["game_id"],
                 handicap,

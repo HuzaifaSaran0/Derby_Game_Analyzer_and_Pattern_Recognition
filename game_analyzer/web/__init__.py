@@ -28,7 +28,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "23"
+STATIC_VER = "25"
 
 
 def _neighbors(game_ids: list[str], game_id: str) -> tuple[str | None, str | None]:

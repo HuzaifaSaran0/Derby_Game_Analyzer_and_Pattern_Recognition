@@ -123,7 +123,13 @@ def _draw_slice(draws: tuple[str, ...], rounds: int) -> tuple[str, ...] | None:
 
 
 def _card_key(cards: tuple[str, ...]) -> str:
+    """Multiset key (order ignored) — handicap rows only."""
     return ",".join(sorted(cards))
+
+
+def _round_key(cards: tuple[str, ...]) -> str:
+    """Positional key — draw rounds must match exact card sequence."""
+    return ",".join(cards)
 
 
 def _handicap_key(rows: tuple[tuple[str, ...], ...]) -> str:
@@ -564,7 +570,7 @@ def draw_round_key(
     round_n: int,
 ) -> str | None:
     cards = draw_round_cards(draw_cards, round_n)
-    return _card_key(cards) if cards else None
+    return _round_key(cards) if cards else None
 
 
 def full_draw_rounds(draw_cards: tuple[str, ...] | list[str]) -> int:

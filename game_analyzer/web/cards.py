@@ -114,14 +114,13 @@ def late_round_game_payload(
     fp,
     *,
     matched_rounds: tuple[int, ...],
-    round_cards: tuple[tuple[int, tuple[str, ...]], ...],
+    round_cards: tuple[tuple[int, tuple[str, ...]], ...] | None = None,
 ) -> dict:
     """Handicap + only the late rounds that matched (not full draw history)."""
-    from game_analyzer.similarity import GameFingerprint
+    from game_analyzer.similarity import GameFingerprint, draw_round_cards
 
     assert isinstance(fp, GameFingerprint)
     winner = fp.winner_suit.title() if fp.winner_suit else None
-    by_round = {rn: cards for rn, cards in round_cards}
     return {
         "game_id": fp.game_id,
         "winner": winner,
@@ -129,11 +128,13 @@ def late_round_game_payload(
         "matched_rounds": [
             {
                 "round_n": rn,
-                "cards": styled_cards(by_round.get(rn, ())),
-                "codes": list(by_round.get(rn, ())),
+                "cards": styled_cards(draw_round_cards(fp.draw_cards, rn) or ()),
+                "codes": list(draw_round_cards(fp.draw_cards, rn) or ()),
             }
             for rn in matched_rounds
         ],
-        "draw_count": sum(len(by_round.get(rn, ())) for rn in matched_rounds),
+        "draw_count": sum(
+            len(draw_round_cards(fp.draw_cards, rn) or ()) for rn in matched_rounds
+        ),
         "draw_rounds": len(matched_rounds),
     }
