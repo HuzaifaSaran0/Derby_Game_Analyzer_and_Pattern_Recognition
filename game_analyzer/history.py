@@ -78,15 +78,14 @@ class HistoryWindow(ctk.CTkToplevel):
 
     def _refresh_late_stats(self) -> None:
         self._stats_job = None
+        from game_analyzer.similarity import friendly_late_round_summary
+
         stats = self.store.late_round_stats()
         r3 = next((s for s in stats if s.round_n == 3), None)
-        if r3 and r3.twin_sets and r3.same_winner_pct is not None:
-            text = (
-                f"Late-round similarity  ·  R3 twins {r3.twin_sets} · "
-                f"same-winner {r3.same_winner_pct:.0f}%"
-            )
+        if r3 and r3.twin_sets:
+            text = friendly_late_round_summary([s for s in stats if s.round_n == 3])
         else:
-            text = "Late-round similarity  ·  no R3 twin sets yet"
+            text = "Draw similarity · Round 3: no matches yet"
         self.high_stats_label.configure(text=text)
 
     def prev(self) -> None:

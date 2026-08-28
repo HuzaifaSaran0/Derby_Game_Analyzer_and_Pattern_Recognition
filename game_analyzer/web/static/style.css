@@ -573,11 +573,115 @@ a { color: var(--accent); }
 .btn-latest { background: var(--success); color: #0d1117; }
 .btn-latest.disabled { background: #333; color: #777; }
 
+.btn-secondary {
+  background: var(--panel-alt);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
 .jump-latest {
   display: block;
   margin-bottom: 12px;
   color: #0d1117;
 }
+
+/* Auth / login */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 12px;
+}
+
+.auth-shell { width: min(420px, 100%); }
+
+.auth-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 18px;
+}
+
+.auth-card-in-app { max-width: 520px; }
+
+.auth-title { margin: 0 0 8px; font-size: 1.35rem; }
+
+.auth-lead { margin: 0 0 16px; color: var(--muted); }
+
+.auth-form { display: grid; gap: 12px; }
+
+.auth-field {
+  display: grid;
+  gap: 6px;
+  font-size: 0.92rem;
+}
+
+.auth-field span { color: var(--muted); }
+
+.auth-field input {
+  width: 100%;
+  min-height: var(--touch);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel-alt);
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 1rem;
+}
+
+.auth-field input[readonly] { opacity: 0.85; }
+
+.auth-submit { width: 100%; margin-top: 4px; }
+
+.auth-actions { display: grid; gap: 8px; }
+
+.auth-note {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.auth-note p { margin: 0 0 8px; }
+
+.auth-note code { font-size: 0.85em; color: var(--text); }
+
+.auth-defaults { color: var(--warn); }
+
+.auth-error {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 90, 103, 0.12);
+  border: 1px solid rgba(255, 90, 103, 0.35);
+  color: #ffb3ba;
+}
+
+.auth-success {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(63, 185, 80, 0.12);
+  border: 1px solid rgba(63, 185, 80, 0.35);
+  color: #8dde9b;
+}
+
+.nav-logout { margin: 0; display: inline; }
+
+.nav-logout-btn {
+  background: none;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.nav-logout-btn:hover { color: var(--text); background: var(--panel-alt); }
 
 /* History */
 .history-head { margin-bottom: 12px; }

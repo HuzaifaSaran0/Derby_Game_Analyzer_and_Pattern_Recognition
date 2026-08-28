@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1117" />
+  <title>Sign in · Game Analyzer</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ static_ver }}" />
+</head>
+<body class="auth-page" data-page="login">
+  <main class="auth-shell">
+    <section class="auth-card">
+      <h1 class="auth-title">Game Analyzer</h1>
+      <p class="auth-lead">Sign in to view live capture, history, and similarity twins.</p>
+
+      {% if error %}
+      <p class="auth-error" role="alert">{{ error }}</p>
+      {% endif %}
+
+      <form class="auth-form" method="post" action="{{ login_action }}">
+        <label class="auth-field">
+          <span>Username</span>
+          <input type="text" name="username" autocomplete="username" required autofocus
+                 value="{{ form_username }}" />
+        </label>
+        <label class="auth-field">
+          <span>Password</span>
+          <input type="password" name="password" autocomplete="current-password" required />
+        </label>
+        <button type="submit" class="btn auth-submit">Sign in</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

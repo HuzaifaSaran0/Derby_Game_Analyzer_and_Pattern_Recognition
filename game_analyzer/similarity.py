@@ -564,6 +564,35 @@ class LateRoundStageStats:
     mean_agreement_pct: float | None
 
 
+def friendly_late_round_stage_title(round_n: int) -> str:
+    """Plain-language label for a late-round cascade stage."""
+    if round_n == 3:
+        return "Round 3"
+    if round_n == 4:
+        return "Rounds 3–4"
+    if round_n == 5:
+        return "Rounds 3–5"
+    return f"Round {round_n}"
+
+
+def friendly_late_round_summary(stages: list[LateRoundStageStats]) -> str:
+    """One-line summary for Live / History stats bars."""
+    if not stages:
+        return "No matching draw history yet"
+    parts: list[str] = []
+    for stage in stages:
+        title = friendly_late_round_stage_title(stage.round_n)
+        if not stage.twin_sets:
+            parts.append(f"{title}: no matches yet")
+            continue
+        noun = "group" if stage.twin_sets == 1 else "groups"
+        bit = f"{title}: {stage.twin_sets} matching {noun}"
+        if stage.same_winner_pct is not None:
+            bit += f" (same winner {stage.same_winner_pct:.0f}% of the time)"
+        parts.append(bit)
+    return " · ".join(parts)
+
+
 def draw_round_cards(
     draw_cards: tuple[str, ...] | list[str],
     round_n: int,

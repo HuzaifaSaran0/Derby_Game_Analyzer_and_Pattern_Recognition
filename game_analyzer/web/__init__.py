@@ -8,15 +8,23 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from game_analyzer.alerts import (
     alert_settings_from_config,
     read_recent_alerts,
 )
 from game_analyzer.config import load_config
-from game_analyzer.similarity import NEAR_SHARED_MIN, draw_round_cards
+from game_analyzer.similarity import NEAR_SHARED_MIN, draw_round_cards, friendly_late_round_summary
 from game_analyzer.store import GameStore
+from game_analyzer.web.auth import (
+    SESSION_USERNAME_KEY,
+    authenticate,
+    change_password,
+    load_auth_record,
+    session_secret,
+)
+from game_analyzer.web.session import SignedCookieSessionMiddleware
 from game_analyzer.web.cards import (
     friendly_cards_text,
     late_round_game_payload,
@@ -32,7 +40,45 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "28"
+STATIC_VER = "30"
+
+
+def _is_public_path(path: str, method: str) -> bool:
+    if path.startswith("/static/"):
+        return True
+    if path == "/login":
+        return True
+    if path == "/logout" and method == "POST":
+        return True
+    return False
+
+
+def _session_username(request: Request) -> str | None:
+    user = request.session.get(SESSION_USERNAME_KEY)
+    return user if user else None
+
+
+def _safe_next_url(next_url: str | None) -> str:
+    if not next_url or not next_url.startswith("/") or next_url.startswith("//"):
+        return "/"
+    if next_url.startswith("/login"):
+        return "/"
+    return next_url
+
+
+def _form_value(form: dict[str, list[str]], key: str) -> str:
+    values = form.get(key) or [""]
+    return str(values[0] if values else "")
+
+
+async def _read_form(request: Request) -> dict[str, str]:
+    body = await request.body()
+    if not body:
+        return {}
+    from urllib.parse import parse_qs
+
+    parsed = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+    return {key: _form_value(parsed, key) for key in parsed}
 
 
 def _neighbors(game_ids: list[str], game_id: str) -> tuple[str | None, str | None]:
@@ -102,21 +148,9 @@ def _game_payload(store: GameStore, game_id: str, *, include_frames: bool = True
 def _stats_payload(store: GameStore) -> dict:
     finished = len(store.list_game_ids(finished_only=True))
     late = store.late_round_stats()
-    bits: list[str] = []
-    for stage in late:
-        label = f"R{stage.round_n}"
-        if not stage.twin_sets:
-            bits.append(f"{label} twins —")
-            continue
-        if stage.same_winner_pct is not None:
-            bits.append(
-                f"{label} twins {stage.twin_sets} · same-winner {stage.same_winner_pct:.0f}%"
-            )
-        else:
-            bits.append(f"{label} twins {stage.twin_sets}")
     return {
         "finished_games": finished,
-        "late_round_text": " · ".join(bits) if bits else "Late-round twins —",
+        "late_round_text": friendly_late_round_summary(late),
         "late_round_stats": [
             {
                 "stage": s.stage,
@@ -390,13 +424,162 @@ def _late_round_focus_payload(
     }
 
 
-def create_app(store: GameStore | None = None) -> FastAPI:
+def create_app(
+    store: GameStore | None = None,
+    *,
+    auth_enabled: bool = True,
+    auth_path: Path | None = None,
+    session_secret_path: Path | None = None,
+) -> FastAPI:
     store = store or GameStore()
     app = FastAPI(title="Game Analyzer")
     templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
 
+    if auth_enabled:
+        import game_analyzer.web.auth as auth_mod
+
+        if auth_path is not None:
+            auth_mod.AUTH_FILE = auth_path
+        if session_secret_path is not None:
+            auth_mod.SESSION_SECRET_FILE = session_secret_path
+        load_auth_record()
+
     def _ctx(request: Request, **extra):
-        return {"request": request, "static_ver": STATIC_VER, **extra}
+        logged_in = _session_username(request) if auth_enabled else None
+        return {
+            "request": request,
+            "static_ver": STATIC_VER,
+            "logged_in": bool(logged_in),
+            "username": logged_in,
+            **extra,
+        }
+
+    @app.middleware("http")
+    async def require_login(request: Request, call_next):
+        if not auth_enabled or _is_public_path(request.url.path, request.method):
+            return await call_next(request)
+        if _session_username(request):
+            return await call_next(request)
+        if request.url.path.startswith("/api/") or request.headers.get("accept", "").startswith(
+            "application/json"
+        ):
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401, headers=NO_CACHE)
+        query = urlencode({"next": request.url.path})
+        return RedirectResponse(url=f"/login?{query}", status_code=302)
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_page(request: Request, next: str | None = Query(None)):
+        if auth_enabled and _session_username(request):
+            return RedirectResponse(_safe_next_url(next), status_code=302)
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={
+                "request": request,
+                "static_ver": STATIC_VER,
+                "error": None,
+                "form_username": "",
+                "next_url": _safe_next_url(next),
+                "login_action": (
+                    f"/login?{urlencode({'next': _safe_next_url(next)})}"
+                    if next and _safe_next_url(next) != "/"
+                    else "/login"
+                ),
+            },
+        )
+
+    @app.post("/login")
+    async def login_submit(request: Request, next: str | None = Query(None)):
+        form = await _read_form(request)
+        username = form.get("username", "").strip()
+        password = form.get("password", "")
+        next_url = _safe_next_url(next)
+        if auth_enabled and authenticate(username, password):
+            request.session[SESSION_USERNAME_KEY] = username
+            return RedirectResponse(next_url, status_code=302)
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={
+                "request": request,
+                "static_ver": STATIC_VER,
+                "error": "Invalid username or password.",
+                "form_username": username,
+                "next_url": next_url,
+                "login_action": (
+                    f"/login?{urlencode({'next': next_url})}"
+                    if next_url != "/"
+                    else "/login"
+                ),
+            },
+            status_code=401,
+        )
+
+    @app.post("/logout")
+    def logout(request: Request):
+        if auth_enabled:
+            request.session.clear()
+        return RedirectResponse("/login", status_code=302)
+
+    @app.get("/change-password", response_class=HTMLResponse)
+    def change_password_page(request: Request):
+        username = _session_username(request) if auth_enabled else None
+        if auth_enabled and not username:
+            return RedirectResponse("/login", status_code=302)
+        return templates.TemplateResponse(
+            request=request,
+            name="change_password.html",
+            context=_ctx(request, active="account", username=username or "admin"),
+        )
+
+    @app.post("/change-password")
+    async def change_password_submit(request: Request):
+        username = _session_username(request) if auth_enabled else None
+        if auth_enabled and not username:
+            return RedirectResponse("/login", status_code=302)
+        form = await _read_form(request)
+        current_password = form.get("current_password", "")
+        new_password = form.get("new_password", "")
+        confirm_password = form.get("confirm_password", "")
+        new_username = form.get("new_username", "").strip() or None
+        if new_password != confirm_password:
+            return templates.TemplateResponse(
+                request=request,
+                name="change_password.html",
+                context=_ctx(
+                    request,
+                    active="account",
+                    username=username,
+                    error="New passwords do not match.",
+                ),
+                status_code=400,
+            )
+        ok, message = change_password(
+            username or "",
+            current_password,
+            new_password,
+            new_username=new_username,
+        )
+        if not ok:
+            return templates.TemplateResponse(
+                request=request,
+                name="change_password.html",
+                context=_ctx(request, active="account", username=username, error=message),
+                status_code=400,
+            )
+        if auth_enabled:
+            record = load_auth_record()
+            request.session[SESSION_USERNAME_KEY] = record["username"]
+        return templates.TemplateResponse(
+            request=request,
+            name="change_password.html",
+            context=_ctx(
+                request,
+                active="account",
+                username=load_auth_record()["username"],
+                success="Password updated.",
+            ),
+        )
 
     def live_games() -> JSONResponse:
         games = store.list_games()
@@ -594,6 +777,14 @@ def create_app(store: GameStore | None = None) -> FastAPI:
         for key, value in NO_CACHE.items():
             response.headers[key] = value
         return response
+
+    if auth_enabled:
+        app.add_middleware(
+            SignedCookieSessionMiddleware,
+            secret_key=session_secret(),
+            max_age=60 * 60 * 24 * 14,
+            same_site="lax",
+        )
 
     return app
 

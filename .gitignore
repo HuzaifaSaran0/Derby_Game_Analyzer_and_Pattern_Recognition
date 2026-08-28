@@ -11,6 +11,8 @@ build/
 data/*.sqlite
 data/*.sqlite-wal
 data/*.sqlite-shm
+data/web_auth.json
+data/session_secret
 
 # Full game screenshots — keep locally, do not publish
 fixtures/live/

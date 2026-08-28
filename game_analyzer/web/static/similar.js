@@ -58,6 +58,13 @@
     kindBanner.hidden = false;
   }
 
+  function lateStageTitle(roundN) {
+    if (roundN === 3) return "Round 3";
+    if (roundN === 4) return "Rounds 3–4";
+    if (roundN === 5) return "Rounds 3–5";
+    return "Round " + roundN;
+  }
+
   function renderLateStats(rows) {
     if (!lateStats || !lateStatsGrid) return;
     if (!rows || !rows.length) {
@@ -68,20 +75,30 @@
     lateStats.hidden = false;
     lateStatsGrid.innerHTML = rows
       .map(function (row) {
+        const title = lateStageTitle(row.round_n);
+        const count =
+          row.twin_sets > 0
+            ? row.twin_sets +
+              " matching " +
+              (row.twin_sets === 1 ? "group" : "groups") +
+              " · " +
+              (row.games_in_sets || 0) +
+              " games"
+            : "No matches yet";
         const same =
-          row.same_winner_pct != null ? row.same_winner_pct + "% same-winner sets" : "—";
+          row.same_winner_pct != null
+            ? "Same winner " + row.same_winner_pct + "% of the time"
+            : "—";
         const mean =
           row.mean_agreement_pct != null
-            ? row.mean_agreement_pct + "% mean agreement"
+            ? "Winners agreed " + row.mean_agreement_pct + "% on average"
             : "—";
         return (
           '<div class="late-stat-card"><strong>' +
-          (row.stage || "") +
+          title +
           "</strong><span>" +
-          (row.twin_sets || 0) +
-          " twin sets · " +
-          (row.games_in_sets || 0) +
-          " games</span><span>" +
+          count +
+          "</span><span>" +
           same +
           "</span><span>" +
           mean +

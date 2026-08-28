@@ -66,7 +66,7 @@ def _client(tmp_path: Path) -> TestClient:
         shot,
         now,
     )
-    return TestClient(create_app(store))
+    return TestClient(create_app(store, auth_enabled=False))
 
 
 def test_home_lists_games(tmp_path: Path):
@@ -89,7 +89,7 @@ def test_live_page(tmp_path: Path):
 
 def test_home_empty(tmp_path: Path):
     store = GameStore(tmp_path / "games.sqlite", root=tmp_path)
-    response = TestClient(create_app(store), follow_redirects=False).get("/games")
+    response = TestClient(create_app(store, auth_enabled=False), follow_redirects=False).get("/games")
     assert response.status_code in {302, 307}
     assert response.headers.get("location") == "/history"
 
@@ -154,7 +154,7 @@ def test_history_neighbors_finished_only(tmp_path: Path):
         shot,
         now,
     )
-    client = TestClient(create_app(store))
+    client = TestClient(create_app(store, auth_enabled=False))
     latest = client.get("/api/history/101").json()
     assert latest["index"] == 2
     assert latest["total"] == 2
@@ -255,7 +255,7 @@ def test_api_picks_up_new_screenshot(tmp_path: Path):
     shot.write_bytes(PNG)
     now = datetime(2026, 8, 18, 18, 0, 0)
     store.record(_decision(), _result(), shot, now)
-    client = TestClient(create_app(store))
+    client = TestClient(create_app(store, auth_enabled=False))
     assert len(client.get("/api/game/100").json()["frames"]) == 1
     store.record(
         _decision(seq=2, phase=GamePhase.IN_PLAY, table_cards=(("Spades", ("AS", "2S", "KS")),)),
