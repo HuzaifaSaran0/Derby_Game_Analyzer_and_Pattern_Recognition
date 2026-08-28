@@ -592,6 +592,12 @@ def full_draw_rounds(draw_cards: tuple[str, ...] | list[str]) -> int:
     return len(clean) // CARDS_PER_DRAW_ROUND
 
 
+def is_production_safe_late_round(fp: GameFingerprint, round_n: int) -> bool:
+    """Whether corpus game ``fp`` is trusted for live/production matching at ``round_n``."""
+    level, _ = _game_round_trust(fp, round_n)
+    return level != TRUST_WEAK
+
+
 def find_late_round_matches(
     live_draws: tuple[str, ...] | list[str],
     corpus: list[GameFingerprint],
@@ -599,6 +605,7 @@ def find_late_round_matches(
     *,
     pool_ids: set[str] | frozenset[str] | tuple[str, ...] | list[str] | None = None,
     exclude_game_id: str | None = None,
+    production_only: bool = False,
 ) -> list[LateRoundHit]:
     """Exact match of one draw round against corpus (optionally restricted to a pool)."""
     if round_n < LATE_ROUND_MIN or round_n > LATE_ROUND_MAX:
@@ -613,6 +620,8 @@ def find_late_round_matches(
         if exclude_game_id and fp.game_id == exclude_game_id:
             continue
         if allow is not None and fp.game_id not in allow:
+            continue
+        if production_only and not is_production_safe_late_round(fp, round_n):
             continue
         other_key = draw_round_key(fp.draw_cards, round_n)
         if other_key is None or other_key != live_key:
@@ -691,6 +700,7 @@ def evaluate_late_round_cascade(
     *,
     live_game_id: str | None = None,
     max_round: int = LATE_ROUND_MAX,
+    production_only: bool = False,
 ) -> dict[int, LateRoundSignal]:
     """Run R3→R4→R5 cascade; return a signal for each stage that still has matches."""
     rounds_seen = full_draw_rounds(live_draws)
@@ -704,6 +714,7 @@ def evaluate_late_round_cascade(
             round_n,
             pool_ids=pool,
             exclude_game_id=live_game_id,
+            production_only=production_only,
         )
         signal = build_late_round_signal(
             live_draws, hits, round_n, live_game_id=live_game_id

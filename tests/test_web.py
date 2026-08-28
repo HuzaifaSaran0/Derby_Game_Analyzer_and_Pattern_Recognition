@@ -211,7 +211,14 @@ def test_similar_and_stats_api(tmp_path: Path):
     assert "items" in notifications
     assert "total" in notifications
     if notifications["items"]:
-        assert notifications["items"][0].get("link", "").startswith("/similar?set=")
+        item = notifications["items"][0]
+        assert item.get("link", "").startswith("/similar?set=")
+        assert "cards_text" in item
+        assert "games" in item
+        assert "winner_note" in item
+        assert "at" in item
+        assert "title" in item
+        assert "message" not in item or item.get("message") is None
     page = client.get("/")
     assert 'data-alert-bell' in page.text
     assert "/static/alerts.js" in page.text

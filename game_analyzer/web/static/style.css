@@ -171,6 +171,12 @@ a { color: var(--accent); }
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
+}
+.alert-item-when {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-left: auto;
 }
 .alert-item-dot {
   width: 8px;
@@ -180,10 +186,57 @@ a { color: var(--accent); }
   flex-shrink: 0;
 }
 .alert-item-title {
+  margin: 8px 0 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.35;
+  font-family: inherit;
+}
+.alert-item-cards {
   margin: 6px 0 0;
   font-size: 0.88rem;
+  line-height: 1.4;
+}
+.alert-item-cards-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.alert-item-games {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+.alert-game-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  font-size: 0.82rem;
+}
+.alert-game-id {
+  color: var(--muted);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.78rem;
+}
+.alert-game-winner {
   font-weight: 600;
-  line-height: 1.3;
+}
+.alert-item-verdict {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--panel);
+}
+.alert-item-verdict.is-same {
+  color: var(--success);
+}
+.alert-item-verdict.is-diff {
+  color: var(--warn);
+}
+.alert-item-verdict.is-unknown {
+  color: var(--muted);
 }
 .alert-empty {
   margin: 0;

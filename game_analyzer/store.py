@@ -557,6 +557,7 @@ class GameStore:
         *,
         live_game_id: str | None = None,
         max_round: int = 5,
+        production_only: bool = True,
     ):
         """R3→R4→R5 exact draw cascade against finished games."""
         from game_analyzer.similarity import evaluate_late_round_cascade
@@ -566,6 +567,7 @@ class GameStore:
             self.similarity_corpus(),
             live_game_id=live_game_id,
             max_round=max_round,
+            production_only=production_only,
         )
 
     def late_round_stats(self, *, max_round: int = 5):

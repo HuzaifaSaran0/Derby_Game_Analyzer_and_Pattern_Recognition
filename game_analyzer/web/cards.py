@@ -40,6 +40,32 @@ def styled_cards(cards) -> list[dict]:
     return [card_display(c) for c in (cards or [])]
 
 
+def friendly_card_label(card: str) -> str:
+    """Plain label for alerts, e.g. ``5♦``."""
+    disp = card_display(card)
+    if not disp["suit"]:
+        return disp["code"]
+    return f"{disp['rank']}{disp['symbol']}"
+
+
+def friendly_cards_text(cards) -> str:
+    labels = [friendly_card_label(c) for c in (cards or []) if c]
+    return " · ".join(labels) if labels else "—"
+
+
+def winner_display(suit: str | None) -> dict:
+    name = (suit or "").strip().title() or None
+    if not name:
+        return {"name": None, "symbol": "?", "color": "#888", "label": "Unknown"}
+    style = SUIT_STYLES.get(name, {"symbol": "?", "color": "#888"})
+    return {
+        "name": name,
+        "symbol": style["symbol"],
+        "color": style["color"],
+        "label": f"{style['symbol']} {name}",
+    }
+
+
 def styled_table_rows(raw) -> list[dict]:
     rows = []
     for item in raw or []:

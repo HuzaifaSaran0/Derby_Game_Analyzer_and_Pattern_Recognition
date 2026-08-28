@@ -52,10 +52,10 @@
     const unread = notifs.unreadCount(items);
     const total = items.length;
     if (!total) {
-      status.textContent = "No R3 twins";
+      status.textContent = "No matches yet";
       return;
     }
-    status.textContent = unread ? unread + " unread · " + total + " total" : total + " notifications";
+    status.textContent = unread ? unread + " unread" : "All read";
   }
 
   function ensureAudio() {
@@ -92,9 +92,69 @@
       .replace(/</g, "&lt;");
   }
 
+  function formatWhen(at) {
+    if (!at) return "";
+    try {
+      const d = new Date(at);
+      if (isNaN(d.getTime())) return at;
+      const now = new Date();
+      const diffMs = now - d;
+      const diffMin = Math.floor(diffMs / 60000);
+      if (diffMin < 1) return "Just now";
+      if (diffMin < 60) return diffMin + "m ago";
+      const diffHr = Math.floor(diffMin / 60);
+      if (diffHr < 24) return diffHr + "h ago";
+      const diffDay = Math.floor(diffHr / 24);
+      if (diffDay < 7) return diffDay + "d ago";
+      return d.toLocaleDateString([], { month: "short", day: "numeric" });
+    } catch (_e) {
+      return at;
+    }
+  }
+
+  function escapeHtml(text) {
+    return String(text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function renderGames(row) {
+    return (row.games || [])
+      .map(function (g) {
+        const color = g.winner_color || "#ddd";
+        const label = g.winner_label || "Unknown";
+        return (
+          '<span class="alert-game-row">' +
+          '<span class="alert-game-id">Game #' +
+          escapeHtml(g.game_id) +
+          "</span>" +
+          '<span class="alert-game-winner" style="color:' +
+          color +
+          '">won ' +
+          escapeHtml(label) +
+          "</span></span>"
+        );
+      })
+      .join("");
+  }
+
+  function renderVerdict(row) {
+    const verdict = row.verdict || "unknown";
+    const cls =
+      verdict === "same" ? "is-same" : verdict === "different" ? "is-diff" : "is-unknown";
+    return (
+      '<p class="alert-item-verdict ' +
+      cls +
+      '">' +
+      escapeHtml(row.winner_note || "") +
+      "</p>"
+    );
+  }
+
   function renderList() {
     if (!items.length) {
-      list.innerHTML = '<p class="muted alert-empty">No R3 twin notifications yet.</p>';
+      list.innerHTML = '<p class="muted alert-empty">No matching round 3 games yet.</p>';
       if (markReadBtn) markReadBtn.disabled = true;
       return;
     }
@@ -112,15 +172,23 @@
           escapeAttr(row.link || "/similar") +
           '" role="link" tabindex="0">' +
           '<div class="alert-item-top">' +
-          '<span class="alert-item-kind">R3 TWIN</span>' +
+          '<span class="alert-item-kind">Round 3 match</span>' +
+          '<span class="alert-item-when">' +
+          escapeHtml(formatWhen(row.at)) +
+          "</span>" +
           (read ? "" : '<span class="alert-item-dot" aria-hidden="true"></span>') +
           "</div>" +
           '<p class="alert-item-title">' +
-          escapeAttr(row.title || "R3 twin") +
+          escapeHtml(row.title || "Round 3 match") +
           "</p>" +
-          '<p class="alert-item-msg">' +
-          escapeAttr(row.message || "") +
-          "</p></article>"
+          '<p class="alert-item-cards"><span class="alert-item-cards-label">Cards drawn:</span> ' +
+          escapeHtml(row.cards_text || "—") +
+          "</p>" +
+          '<div class="alert-item-games">' +
+          renderGames(row) +
+          "</div>" +
+          renderVerdict(row) +
+          "</article>"
         );
       })
       .join("");
