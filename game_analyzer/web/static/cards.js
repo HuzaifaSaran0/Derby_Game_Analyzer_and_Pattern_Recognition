@@ -50,10 +50,11 @@ window.gameAnalyzerCards = {
     if (!rounds || !rounds.length) return "";
     return rounds
       .map(function (row) {
+        const label = row.label || "Round " + row.round_n + " draw cards";
         return (
-          '<div class="game-card-section"><strong>R' +
-          row.round_n +
-          " draws</strong>" +
+          '<div class="game-card-section"><strong>' +
+          label +
+          "</strong>" +
           '<div class="mini-cards matched-round-cards">' +
           window.gameAnalyzerCards.miniCards(row.cards) +
           "</div></div>"
@@ -95,7 +96,9 @@ window.gameAnalyzerCards = {
       "</span></div><div class=\"game-card-section\"><strong>Handicap</strong>" +
       this.suitTable(game.handicap) +
       "</div>";
-    if (game.matched_rounds && game.matched_rounds.length) {
+    if (game.draw_rounds && game.draw_rounds.length) {
+      html += this.matchedRoundsBlock(game.draw_rounds);
+    } else if (game.matched_rounds && game.matched_rounds.length) {
       html += this.matchedRoundsBlock(game.matched_rounds);
     } else {
       html +=

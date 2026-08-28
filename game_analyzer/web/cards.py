@@ -53,6 +53,18 @@ def friendly_cards_text(cards) -> str:
     return " · ".join(labels) if labels else "—"
 
 
+def draw_round_label(round_n: int) -> str:
+    """Plain label for one draw round, e.g. 'Third round draw cards'."""
+    names = {
+        1: "First round draw cards",
+        2: "Second round draw cards",
+        3: "Third round draw cards",
+        4: "Fourth round draw cards",
+        5: "Fifth round draw cards",
+    }
+    return names.get(round_n, f"Round {round_n} draw cards")
+
+
 def winner_display(suit: str | None) -> dict:
     name = (suit or "").strip().title() or None
     if not name:
@@ -136,16 +148,43 @@ def fingerprint_payload(fp) -> dict:
     }
 
 
+def all_draw_rounds_payload(
+    fp,
+    *,
+    matched_rounds: tuple[int, ...] | None = None,
+) -> list[dict]:
+    """Every saved draw round for one game, in order."""
+    from game_analyzer.similarity import draw_round_cards, full_draw_rounds
+
+    matched = set(matched_rounds or ())
+    rounds_seen = full_draw_rounds(fp.draw_cards)
+    rows: list[dict] = []
+    for round_n in range(1, rounds_seen + 1):
+        cards = draw_round_cards(fp.draw_cards, round_n)
+        if not cards:
+            continue
+        rows.append(
+            {
+                "round_n": round_n,
+                "label": draw_round_label(round_n),
+                "cards": styled_cards(cards),
+                "codes": list(cards),
+                "matched": round_n in matched if matched else False,
+            }
+        )
+    return rows
+
+
 def late_round_game_payload(
     fp,
     *,
     matched_rounds: tuple[int, ...],
     round_cards: tuple[tuple[int, tuple[str, ...]], ...] | None = None,
 ) -> dict:
-    """Handicap + only the late rounds that matched (not full draw history)."""
-    from game_analyzer.similarity import GameFingerprint, draw_round_cards
+    """Handicap + every draw round saved for this game."""
+    from game_analyzer.similarity import GameFingerprint, draw_round_cards, full_draw_rounds
 
-    del round_cards  # per-game slices only (never shared sample cards)
+    del round_cards
     assert isinstance(fp, GameFingerprint)
     winner = fp.winner_suit.title() if fp.winner_suit else None
     frame_r3 = draw_round_cards(fp.frame_draws, 3) if fp.frame_draws else None
@@ -156,22 +195,15 @@ def late_round_game_payload(
         and chosen_r3 is not None
         and frame_r3 == chosen_r3
     )
+    draw_rounds = all_draw_rounds_payload(fp, matched_rounds=matched_rounds)
     return {
         "game_id": fp.game_id,
         "winner": winner,
         "handicap": handicap_table(fp.handicap_cards),
         "draw_source": fp.draw_source,
         "frame_verified": frame_verified,
-        "matched_rounds": [
-            {
-                "round_n": rn,
-                "cards": styled_cards(draw_round_cards(fp.draw_cards, rn) or ()),
-                "codes": list(draw_round_cards(fp.draw_cards, rn) or ()),
-            }
-            for rn in matched_rounds
-        ],
-        "draw_count": sum(
-            len(draw_round_cards(fp.draw_cards, rn) or ()) for rn in matched_rounds
-        ),
-        "draw_rounds": len(matched_rounds),
+        "draw_rounds": draw_rounds,
+        "matched_round_ns": list(matched_rounds),
+        "draw_count": len(fp.draw_cards),
+        "draw_rounds_count": full_draw_rounds(fp.draw_cards),
     }

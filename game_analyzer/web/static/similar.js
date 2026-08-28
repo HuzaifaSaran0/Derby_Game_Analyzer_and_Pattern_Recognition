@@ -89,10 +89,6 @@
           row.same_winner_pct != null
             ? "Same winner " + row.same_winner_pct + "% of the time"
             : "—";
-        const mean =
-          row.mean_agreement_pct != null
-            ? "Winners agreed " + row.mean_agreement_pct + "% on average"
-            : "—";
         return (
           '<div class="late-stat-card"><strong>' +
           title +
@@ -100,8 +96,6 @@
           count +
           "</span><span>" +
           same +
-          "</span><span>" +
-          mean +
           "</span></div>"
         );
       })
@@ -115,9 +109,10 @@
       '<div class="cluster-shared-rounds">' +
       rounds
         .map(function (row) {
+          const label = row.label || "Round " + row.round_n + " draw cards";
           return (
-            '<div class="game-card-section"><strong>Shared R' +
-            row.round_n +
+            '<div class="game-card-section"><strong>Shared · ' +
+            label +
             "</strong>" +
             '<div class="mini-cards matched-round-cards">' +
             cards.miniCards(row.cards) +

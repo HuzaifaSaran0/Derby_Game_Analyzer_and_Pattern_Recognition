@@ -26,6 +26,7 @@ from game_analyzer.web.auth import (
 )
 from game_analyzer.web.session import SignedCookieSessionMiddleware
 from game_analyzer.web.cards import (
+    draw_round_label,
     friendly_cards_text,
     late_round_game_payload,
     styled_cards,
@@ -40,7 +41,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "30"
+STATIC_VER = "31"
 
 
 def _is_public_path(path: str, method: str) -> bool:
@@ -205,6 +206,7 @@ def _twin_set_payload(twin_set) -> dict:
         "round_cards": [
             {
                 "round_n": rn,
+                "label": draw_round_label(rn),
                 "cards": styled_cards(cards),
                 "codes": list(cards),
             }
@@ -410,6 +412,7 @@ def _late_round_focus_payload(
         "round_cards": [
             {
                 "round_n": rn,
+                "label": draw_round_label(rn),
                 "cards": styled_cards(cards),
                 "codes": list(cards),
             }
