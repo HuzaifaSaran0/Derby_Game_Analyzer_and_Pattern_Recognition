@@ -257,7 +257,13 @@ def capture_once(config: dict | None = None):
     stem = decision.file_stem(captured_at)
     raw_path = folder / f"{stem}.png"
     if decision.should_save:
-        write_image(raw_path, frame)
+        save_frame = frame
+        if decision.phase == GamePhase.FINISHED:
+            settle = float(capture.get("finished_capture_settle_seconds", 0.5))
+            if settle > 0:
+                time.sleep(settle)
+                save_frame = grab_frame(config)
+        write_image(raw_path, save_frame)
         if config.get("draw_overlays", False):
             overlay_path = folder / f"{stem}_boxes.png"
             overlay = draw_table_overlay(frame[:, :, ::-1], config, result)

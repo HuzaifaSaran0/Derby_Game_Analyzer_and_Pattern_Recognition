@@ -31,7 +31,8 @@
     "dual_trigger_settle_seconds": 4.0,
     "dual_trigger_peek_seconds": 0.25,
     "result_window_seconds": 13,
-    "result_poll_seconds": 0.5
+    "result_poll_seconds": 0.5,
+    "finished_capture_settle_seconds": 0.5
   },
   "draw_overlays": false,
   "alerts": {

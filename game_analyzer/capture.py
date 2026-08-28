@@ -341,13 +341,16 @@ def auto_crop_derby_panel(frame: np.ndarray) -> np.ndarray:
         else:
             run = 0
 
-    # Top = below Dashboard + Lobby/Hold'em teal navbar (last bright band in top quarter).
+    # Top = below Dashboard + Lobby/Hold'em teal navbar only.
+    # Scan just the header strip — winner/finish screens add bright bands in the
+    # game panel (finish line flash) that must not drive this crop.
     row = rgb.mean(axis=(1, 2))
     top = 0
-    y_limit = max(40, h // 4)
+    navbar_scan = min(72, max(36, h // 12))
+    max_top_crop = min(68, max(28, h // 14))
     in_bright = False
     last_bright_end = 0
-    for y in range(y_limit):
+    for y in range(navbar_scan):
         bright = row[y] > 170
         if bright:
             in_bright = True
@@ -356,7 +359,7 @@ def auto_crop_derby_panel(frame: np.ndarray) -> np.ndarray:
             last_bright_end = y
             in_bright = False
     if last_bright_end > 20:
-        top = min(h - 50, last_bright_end + 2)
+        top = min(max_top_crop, last_bright_end + 2)
 
     if right - left < w // 3:
         return frame
