@@ -7,7 +7,7 @@
   <h2 class="section-title">Backup &amp; restore</h2>
   <p class="muted">
     Export your game database, screenshots, and twin-set cache for moving to another server.
-    Import merges new games only — existing game IDs are left unchanged.
+    Import adds new games by default; turn on replace to update games that already exist.
   </p>
 
   <div class="data-stats" data-data-stats>
@@ -28,6 +28,10 @@
       <label class="data-file-label">
         <span>Choose backup file</span>
         <input type="file" accept=".zip,application/zip" data-data-file />
+      </label>
+      <label class="data-check-label">
+        <input type="checkbox" data-data-overwrite />
+        Replace games that already exist (updates database rows and screenshots)
       </label>
       <button type="button" class="btn btn-secondary" data-data-import disabled>Import backup</button>
       <p class="data-hint muted" data-import-status hidden></p>

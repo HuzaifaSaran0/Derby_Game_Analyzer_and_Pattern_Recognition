@@ -49,7 +49,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "32"
+STATIC_VER = "33"
 
 
 def _is_public_path(path: str, method: str) -> bool:
@@ -88,6 +88,18 @@ async def _read_form(request: Request) -> dict[str, str]:
 
     parsed = parse_qs(body.decode("utf-8"), keep_blank_values=True)
     return {key: _form_value(parsed, key) for key in parsed}
+
+
+async def _save_upload_stream(request: Request, dest: Path, *, max_bytes: int) -> int:
+    """Write request body to disk in chunks (avoids loading large zips into RAM)."""
+    total = 0
+    with dest.open("wb") as handle:
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > max_bytes:
+                raise HTTPException(status_code=413, detail="Backup file too large.")
+            handle.write(chunk)
+    return total
 
 
 def _neighbors(game_ids: list[str], game_id: str) -> tuple[str | None, str | None]:
@@ -680,7 +692,7 @@ def create_app(
         )
 
     @app.post("/api/data/import")
-    async def api_data_import(request: Request):
+    async def api_data_import(request: Request, overwrite: bool = Query(False)):
         import tempfile
 
         content_length = request.headers.get("content-length")
@@ -690,17 +702,14 @@ def create_app(
                     raise HTTPException(status_code=413, detail="Backup file too large.")
             except ValueError:
                 pass
-        body = await request.body()
-        if len(body) > MAX_IMPORT_BYTES:
-            raise HTTPException(status_code=413, detail="Backup file too large.")
-        if not body:
-            raise HTTPException(status_code=400, detail="Empty upload.")
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
         path = Path(tmp.name)
+        tmp.close()
         try:
-            tmp.write(body)
-            tmp.close()
-            report = import_from_zip(store, path, merge=True)
+            received = await _save_upload_stream(request, path, max_bytes=MAX_IMPORT_BYTES)
+            if received == 0:
+                raise HTTPException(status_code=400, detail="Empty upload.")
+            report = import_from_zip(store, path, merge=True, overwrite=overwrite)
         finally:
             path.unlink(missing_ok=True)
         status = 200 if report.ok else 400

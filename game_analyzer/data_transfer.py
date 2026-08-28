@@ -10,7 +10,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from game_analyzer.similarity_cache import (
@@ -44,6 +44,7 @@ class DataSummary:
 @dataclass
 class ImportReport:
     games_added: int = 0
+    games_updated: int = 0
     games_skipped: int = 0
     frames_added: int = 0
     screenshots_copied: int = 0
@@ -62,6 +63,7 @@ class ImportReport:
         return {
             "ok": not self.errors,
             "games_added": self.games_added,
+            "games_updated": self.games_updated,
             "games_skipped": self.games_skipped,
             "frames_added": self.frames_added,
             "screenshots_copied": self.screenshots_copied,
@@ -78,6 +80,8 @@ class ImportReport:
         if self.errors:
             return "Import failed: " + "; ".join(self.errors[:3])
         parts = [f"{self.games_added} games added"]
+        if self.games_updated:
+            parts.append(f"{self.games_updated} updated")
         if self.games_skipped:
             parts.append(f"{self.games_skipped} skipped (already present)")
         if self.screenshots_copied:
@@ -257,11 +261,27 @@ def _table_columns(con: sqlite3.Connection, table: str) -> list[str]:
     return [row[1] for row in con.execute(f"PRAGMA table_info({table})").fetchall()]
 
 
+def _safe_screenshot_target(root: Path, zip_name: str) -> Path | None:
+    """Resolve a zip entry under fixtures/live/ without path traversal."""
+    if not zip_name.startswith(SCREENSHOTS_ZIP_PREFIX) or zip_name.endswith("/"):
+        return None
+    parts = PurePosixPath(zip_name).parts
+    if ".." in parts:
+        return None
+    target = root.joinpath(*parts)
+    try:
+        target.resolve().relative_to(root.resolve())
+    except (ValueError, OSError):
+        return None
+    return target
+
+
 def import_from_zip(
     store: GameStore,
     archive: Path,
     *,
     merge: bool = True,
+    overwrite: bool = False,
 ) -> ImportReport:
     """Import games, frames, screenshots, and optional twin cache from a backup zip."""
     report = ImportReport()
@@ -285,14 +305,15 @@ def import_from_zip(
                     zf.extract(CACHE_ZIP_PATH, tmp_path)
                     report.cache_imported = True
                 for name in zf.namelist():
-                    if name.startswith(SCREENSHOTS_ZIP_PREFIX) and not name.endswith("/"):
-                        target = store.root / name
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        if target.exists() and merge:
-                            continue
-                        with zf.open(name) as src, target.open("wb") as dst:
-                            shutil.copyfileobj(src, dst)
-                        report.screenshots_copied += 1
+                    target = _safe_screenshot_target(store.root, name)
+                    if target is None:
+                        continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    if target.exists() and merge and not overwrite:
+                        continue
+                    with zf.open(name) as src, target.open("wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    report.screenshots_copied += 1
         except (zipfile.BadZipFile, ValueError) as exc:
             report.errors.append(str(exc))
             return report
@@ -301,7 +322,7 @@ def import_from_zip(
         source_cache = tmp_path / CACHE_ZIP_PATH
 
         try:
-            _merge_sqlite(store, source_db, report, merge=merge)
+            _merge_sqlite(store, source_db, report, merge=merge, overwrite=overwrite)
         except sqlite3.Error as exc:
             report.errors.append(f"Database merge failed: {exc}")
             return report
@@ -335,6 +356,7 @@ def _merge_sqlite(
     report: ImportReport,
     *,
     merge: bool,
+    overwrite: bool,
 ) -> None:
     with _connect_ro(source_db) as src, store._connect() as dest:
         dest.execute("PRAGMA foreign_keys=ON")
@@ -355,16 +377,25 @@ def _merge_sqlite(
             game_id = row_dict.get("game_id")
             if not game_id:
                 continue
-            if merge and game_id in existing:
-                report.games_skipped += 1
-                continue
+            if game_id in existing:
+                if merge and not overwrite:
+                    report.games_skipped += 1
+                    continue
+                if overwrite:
+                    dest.execute("DELETE FROM frames WHERE game_id=?", (game_id,))
+                    dest.execute("DELETE FROM games WHERE game_id=?", (game_id,))
+                    report.games_updated += 1
+                elif not merge:
+                    report.games_skipped += 1
+                    continue
+            else:
+                report.games_added += 1
             placeholders = ", ".join("?" for _ in use_game_cols)
             cols_sql = ", ".join(use_game_cols)
             dest.execute(
                 f"INSERT INTO games ({cols_sql}) VALUES ({placeholders})",
                 tuple(row_dict[c] for c in use_game_cols),
             )
-            report.games_added += 1
             existing.add(game_id)
 
             frames = src.execute(

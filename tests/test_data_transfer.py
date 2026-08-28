@@ -129,6 +129,23 @@ def test_import_merge_skips_existing(tmp_path: Path):
     assert again.games_skipped == 1
 
 
+def test_import_overwrite_replaces_existing(tmp_path: Path):
+    source = _seed_store(tmp_path / "src")
+    archive = tmp_path / "backup.zip"
+    build_export_zip(source, archive)
+
+    dest_root = tmp_path / "dest"
+    dest = GameStore(dest_root / "games.sqlite", root=dest_root)
+    import_from_zip(dest, archive, merge=True)
+
+    again = import_from_zip(dest, archive, merge=True, overwrite=True)
+    assert again.ok
+    assert again.games_added == 0
+    assert again.games_updated == 1
+    assert again.games_skipped == 0
+    assert dest.list_game_ids() == ["100"]
+
+
 def test_web_data_routes(tmp_path: Path):
     store = _seed_store(tmp_path)
     client = TestClient(create_app(store, auth_enabled=False))

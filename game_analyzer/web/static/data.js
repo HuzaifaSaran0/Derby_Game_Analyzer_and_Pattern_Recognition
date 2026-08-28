@@ -8,6 +8,7 @@
   const fileInput = document.querySelector("[data-data-file]");
   const importBtn = document.querySelector("[data-data-import]");
   const importStatus = document.querySelector("[data-import-status]");
+  const overwriteInput = document.querySelector("[data-data-overwrite]");
 
   function formatBytes(n) {
     if (!n && n !== 0) return "—";
@@ -105,7 +106,11 @@
       importStatus.className = "data-hint muted";
     }
     try {
-      const resp = await fetch("/api/data/import", {
+      var importUrl = "/api/data/import";
+      if (overwriteInput && overwriteInput.checked) {
+        importUrl += "?overwrite=1";
+      }
+      const resp = await fetch(importUrl, {
         method: "POST",
         headers: { "Content-Type": "application/zip" },
         body: file,
