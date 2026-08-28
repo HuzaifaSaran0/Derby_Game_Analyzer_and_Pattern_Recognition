@@ -1,5 +1,5 @@
 {
-  "notes": "Hybrid schedule (brave_cdp): read timer on game-start shot and sleep that long; after handicap wait handicap_wait_seconds (~37); mid draws wait mid_round_seconds (~32); after each IN_PLAY poll result_window_seconds for WINNER. dual_trigger retries if cards lag. Screen mode uses the same schedule without CDP timer reads.",
+  "notes": "Hybrid schedule (brave_cdp): read timer on game-start shot and sleep that long; after handicap wait handicap_wait_seconds (~37); mid draws wait mid_round_seconds (~32); after each IN_PLAY poll result_window_seconds for WINNER. dual_trigger retries if cards lag. Screen mode uses the same schedule without CDP timer reads. recapture_*: ~8-9s after each saved shot the back/lay table is on screen, so a background retake swaps the PNG in place (analysis timing unchanged).",
   "capture": {
     "mode": "brave_cdp",
     "cdp_host": "127.0.0.1",
@@ -21,6 +21,9 @@
     "round_seconds_rest": 32,
     "fallback_seconds": 42,
     "use_timer_sync": true,
+    "recapture_enabled": true,
+    "recapture_delay_seconds": 9,
+    "recapture_start_delay_seconds": 8,
     "timer_wait_pad_seconds": 1,
     "timer_capture_at": 1,
     "timer_reset_above": 20,

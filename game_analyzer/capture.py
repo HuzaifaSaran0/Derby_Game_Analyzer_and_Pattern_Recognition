@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import struct
+import threading
 import urllib.error
 import urllib.request
 from io import BytesIO
@@ -12,6 +13,10 @@ from urllib.parse import urlparse
 
 import numpy as np
 from PIL import Image
+
+# Serialize CDP/screen grabs: the delayed lay/back retake thread must not
+# interleave with the main loop's timer reads or screenshots.
+_GRAB_LOCK = threading.RLock()
 
 
 def list_monitors() -> list[dict]:
@@ -32,8 +37,9 @@ def grab_region(region: dict[str, int]) -> np.ndarray:
         "width": int(region["width"]),
         "height": int(region["height"]),
     }
-    with mss.mss() as sct:
-        raw = np.array(sct.grab(box))
+    with _GRAB_LOCK:
+        with mss.mss() as sct:
+            raw = np.array(sct.grab(box))
     return raw[:, :, :3]
 
 
@@ -137,22 +143,23 @@ def _cdp_connect(ws_url: str) -> socket.socket:
 
 
 def _cdp_call(ws_url: str, method: str, params: dict | None = None) -> dict:
-    sock = _cdp_connect(ws_url)
-    try:
-        msg_id = 1
-        payload = {"id": msg_id, "method": method}
-        if params:
-            payload["params"] = params
-        _ws_send_text(sock, json.dumps(payload))
-        while True:
-            data = json.loads(_ws_recv_frame(sock).decode("utf-8"))
-            if data.get("id") != msg_id:
-                continue
-            if "error" in data:
-                raise RuntimeError(f"CDP {method} failed: {data['error']}")
-            return data.get("result") or {}
-    finally:
-        sock.close()
+    with _GRAB_LOCK:
+        sock = _cdp_connect(ws_url)
+        try:
+            msg_id = 1
+            payload = {"id": msg_id, "method": method}
+            if params:
+                payload["params"] = params
+            _ws_send_text(sock, json.dumps(payload))
+            while True:
+                data = json.loads(_ws_recv_frame(sock).decode("utf-8"))
+                if data.get("id") != msg_id:
+                    continue
+                if "error" in data:
+                    raise RuntimeError(f"CDP {method} failed: {data['error']}")
+                return data.get("result") or {}
+        finally:
+            sock.close()
 
 
 def _cdp_screenshot_png(ws_url: str) -> bytes:

@@ -11,6 +11,8 @@ Hybrid schedule (brave_cdp):
 from __future__ import annotations
 
 import argparse
+import os
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +20,7 @@ from pathlib import Path
 from game_analyzer.alerts import alert_settings_from_config, deliver_similarity_alert
 from game_analyzer.capture import grab_frame, list_brave_tabs, list_monitors, read_page_game_id, read_page_timer
 from game_analyzer.config import load_config
+from game_analyzer.models import GamePhase
 from game_analyzer.round_sync import (
     ResultWatchOutcome,
     WaitTrigger,
@@ -44,6 +47,7 @@ _LAST_WAIT: WaitTrigger | None = None
 _CAPTURE_STARTED_AT: float | None = None
 _SCHEDULE_ANCHOR_AT: float | None = None
 _TIMER_SAMPLED_AT: float | None = None
+_FRAME_GRABBED_AT: float | None = None
 # Late-round (R3+) twin alerts: dedupe per live game / round.
 _LATE_ROUND_GAME_ID: str | None = None
 _LATE_ROUND_ALERTED: set[str] = set()
@@ -129,10 +133,79 @@ def _maybe_late_round_alerts(config: dict, decision: SessionDecision) -> None:
         )
 
 
+def _retake_delay_seconds(capture: dict, phase: GamePhase) -> float | None:
+    """Seconds after the saved shot when the back/lay table should be on screen.
+
+    None disables the retake (FINISHED shots, or recapture_enabled=false).
+    """
+    if not bool(capture.get("recapture_enabled", True)):
+        return None
+    if phase == GamePhase.FINISHED:
+        return None
+    if phase == GamePhase.START:
+        return float(capture.get("recapture_start_delay_seconds", 8.0))
+    return float(capture.get("recapture_delay_seconds", 9.0))
+
+
+def retake_screenshot_for_lay_back(
+    config: dict,
+    path: Path,
+    game_id: str | None,
+    *,
+    read_id=None,
+    grab=None,
+    extract=None,
+    write=None,
+) -> bool:
+    """Re-grab the screen (back/lay table now visible) and swap the saved PNG in place.
+
+    The original analysis/DB record is untouched — only the image file is replaced.
+    Keeps the original file when the game changed or already shows the winner screen
+    (the table never appeared for that round).
+    """
+    from game_analyzer.vision import extract_real, write_image
+
+    read_id = read_id or read_page_game_id
+    grab = grab or grab_frame
+    extract = extract or extract_real
+    write = write or write_image
+    try:
+        current_id = read_id(config["capture"])
+        if game_id and current_id and current_id != game_id:
+            return False
+        frame = grab(config)
+        result = extract(frame, config)
+        if result.game_phase() == GamePhase.FINISHED:
+            return False
+        tmp = path.with_name(path.stem + "_retake.png")
+        write(tmp, frame)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False
+
+
+def _schedule_lay_back_retake(config: dict, decision: SessionDecision, path: Path) -> None:
+    """Fire the retake ~8-9s after the frame grab, without blocking the capture loop."""
+    delay = _retake_delay_seconds(config["capture"], decision.phase)
+    if delay is None:
+        return
+    remaining = delay
+    if _FRAME_GRABBED_AT is not None:
+        remaining = max(0.0, delay - (time.monotonic() - _FRAME_GRABBED_AT))
+    timer = threading.Timer(
+        remaining,
+        retake_screenshot_for_lay_back,
+        args=(config, path, decision.game_id),
+    )
+    timer.daemon = True
+    timer.start()
+
+
 def capture_once(config: dict | None = None):
     """Grab via screen box or Brave CDP, save PNG + overlay, return paths/result."""
     global _LAST_DECISION, _LAST_FRAME, _LAST_PATH, _LAST_RESULT
-    global _CAPTURE_STARTED_AT, _SCHEDULE_ANCHOR_AT, _TIMER_SAMPLED_AT
+    global _CAPTURE_STARTED_AT, _SCHEDULE_ANCHOR_AT, _TIMER_SAMPLED_AT, _FRAME_GRABBED_AT
     _CAPTURE_STARTED_AT = time.monotonic()
     config = config or load_config()
     SESSION_TRACKER.timing = _timing_from_config(config)
@@ -154,6 +227,7 @@ def capture_once(config: dict | None = None):
     timer_seconds = timer.seconds if timer is not None else None
 
     frame = grab_frame(config)
+    _FRAME_GRABBED_AT = time.monotonic()
     result = extract_real(frame, config)
     captured_at = datetime.now()
     decision = SESSION_TRACKER.observe(
@@ -176,6 +250,9 @@ def capture_once(config: dict | None = None):
         # Anchor fixed 32/37 schedule waits to saved shots (not result-window peeks).
         _SCHEDULE_ANCHOR_AT = _CAPTURE_STARTED_AT
         _maybe_late_round_alerts(config, decision)
+        # ~9s later the back/lay table is on screen: swap the PNG in place (analysis
+        # above already ran on this frame; timing of the next shot is unaffected).
+        _schedule_lay_back_retake(config, decision, raw_path)
     _LAST_DECISION = decision
     _LAST_FRAME = frame
     _LAST_PATH = raw_path
