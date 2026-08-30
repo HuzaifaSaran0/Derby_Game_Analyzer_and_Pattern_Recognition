@@ -25,6 +25,7 @@ from game_analyzer.data_transfer import (
 )
 from game_analyzer.similarity import NEAR_SHARED_MIN, draw_round_cards, friendly_late_round_summary
 from game_analyzer.store import GameStore
+from game_analyzer.winner_hints import live_winner_hints_if_in_progress
 from game_analyzer.web.auth import (
     SESSION_USERNAME_KEY,
     authenticate,
@@ -49,7 +50,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "34"
+STATIC_VER = "36"
 
 
 def _is_public_path(path: str, method: str) -> bool:
@@ -759,6 +760,10 @@ def create_app(
         payload["ready"] = True
         payload["stats"] = _stats_payload(store)
         payload["alerts"] = alerts
+        payload["winner_hints"] = live_winner_hints_if_in_progress(
+            store,
+            in_progress=payload.get("in_progress", False),
+        )
         return JSONResponse(payload, headers=NO_CACHE)
 
     @app.get("/api/notifications")

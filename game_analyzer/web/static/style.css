@@ -410,6 +410,71 @@ a { color: var(--accent); }
   gap: 12px;
 }
 
+.winner-hints-lead {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.winner-hints-rows {
+  display: grid;
+  gap: 10px;
+}
+
+.winner-hint-row {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--panel-alt);
+}
+
+.winner-hint-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.winner-hint-tail {
+  color: var(--text);
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+}
+
+.winner-hint-suit {
+  font-weight: 600;
+}
+
+.winner-hint-matches {
+  margin-left: auto;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.winner-hint-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.winner-hint-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+}
+
+.winner-hint-summary {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 .preview-box {
   background: var(--panel-alt);
   border-radius: 8px;
