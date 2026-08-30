@@ -13,6 +13,9 @@ from game_analyzer.winner_hints import (
     analyze_tail,
     live_winner_hints,
     live_winner_hints_if_in_progress,
+    parse_pattern_codes,
+    search_pattern,
+    search_winner_pattern,
     winner_code,
 )
 
@@ -172,3 +175,46 @@ def test_live_page_includes_winner_hints_panel(tmp_path: Path):
     page = client.get("/")
     assert "Winner history hints" in page.text
     assert "data-winner-hints-panel" in page.text
+    assert "Search winner pattern" in page.text
+    assert "data-winner-search-panel" in page.text
+
+
+def test_parse_pattern_codes():
+    assert parse_pattern_codes("3,2,4,2", 4) == [3, 2, 4, 2]
+    assert parse_pattern_codes("3,2,4", 4) is None
+    assert parse_pattern_codes("3,2,9,2", 4) is None
+    assert parse_pattern_codes("bad", 4) is None
+
+
+def test_search_pattern_manual_tail():
+    follow_ups = [4, 2, 4, 2, 4, 4, 4, 3, 1, 2]
+    codes: list[int] = []
+    for f in follow_ups:
+        codes.extend([3, 2, 4, 2, f, 9])
+    row = search_pattern(codes, (3, 2, 4, 2))
+    assert row.match_count == 10
+    assert row.follow_up_counts[4] == 5
+
+
+def test_search_winner_pattern_api(tmp_path: Path):
+    store = GameStore(tmp_path / "games.sqlite", root=tmp_path)
+    shot = tmp_path / "001.png"
+    shot.write_bytes(PNG)
+    now = datetime(2026, 8, 18, 18, 0, 0)
+
+    for i, winner in enumerate(
+        [Suit.CLUBS, Suit.HEARTS, Suit.DIAMONDS, Suit.HEARTS] * 3,
+        start=1,
+    ):
+        _record_winner(store, str(i), winner, shot, now)
+
+    client = TestClient(create_app(store, auth_enabled=False))
+    resp = client.get("/api/winner-hints/search?length=4&pattern=3,2,4,2")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["pattern"] == [3, 2, 4, 2]
+    assert "result" in data
+    assert data["finished_games"] == 12
+
+    bad = client.get("/api/winner-hints/search?length=4&pattern=3,2,9,2")
+    assert bad.status_code == 400

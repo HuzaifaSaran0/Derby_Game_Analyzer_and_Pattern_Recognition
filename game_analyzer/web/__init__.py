@@ -25,7 +25,13 @@ from game_analyzer.data_transfer import (
 )
 from game_analyzer.similarity import NEAR_SHARED_MIN, draw_round_cards, friendly_late_round_summary
 from game_analyzer.store import GameStore
-from game_analyzer.winner_hints import live_winner_hints_if_in_progress
+from game_analyzer.winner_hints import (
+    HINT_LENGTHS,
+    SUIT_META,
+    live_winner_hints_if_in_progress,
+    parse_pattern_codes,
+    search_winner_pattern,
+)
 from game_analyzer.web.auth import (
     SESSION_USERNAME_KEY,
     authenticate,
@@ -50,7 +56,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "36"
+STATIC_VER = "37"
 
 
 def _is_public_path(path: str, method: str) -> bool:
@@ -637,7 +643,12 @@ def create_app(
         return templates.TemplateResponse(
             request=request,
             name="live.html",
-            context=_ctx(request, active="live"),
+            context=_ctx(
+                request,
+                active="live",
+                winner_suit_meta=SUIT_META,
+                winner_hint_lengths=list(HINT_LENGTHS),
+            ),
         )
 
     @app.get("/games")
@@ -765,6 +776,19 @@ def create_app(
             in_progress=payload.get("in_progress", False),
         )
         return JSONResponse(payload, headers=NO_CACHE)
+
+    @app.get("/api/winner-hints/search")
+    def api_winner_hints_search(
+        length: int = Query(..., ge=4, le=10),
+        pattern: str = Query(..., min_length=1),
+    ):
+        codes = parse_pattern_codes(pattern, length)
+        if codes is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Pattern must be comma-separated suit codes (1–4) matching the group size.",
+            )
+        return JSONResponse(search_winner_pattern(store, codes), headers=NO_CACHE)
 
     @app.get("/api/notifications")
     def api_notifications():

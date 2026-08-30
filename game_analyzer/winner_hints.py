@@ -105,11 +105,24 @@ def analyze_tail(finished_codes: list[int], length: int) -> HintRow | None:
     n = len(finished_codes)
     if length < 1 or n < length:
         return None
-    tail = tuple(finished_codes[-length:])
+    return search_pattern(finished_codes, tuple(finished_codes[-length:]))
+
+
+def search_pattern(finished_codes: list[int], pattern: tuple[int, ...]) -> HintRow:
+    """Find every occurrence of ``pattern`` in history and tally the next winner."""
+    length = len(pattern)
+    n = len(finished_codes)
     follow_counts: dict[int, int] = {1: 0, 2: 0, 3: 0, 4: 0}
+    if length < 1 or n < length:
+        return HintRow(
+            length=length,
+            tail=pattern,
+            match_count=0,
+            follow_up_counts=follow_counts,
+        )
 
     for start in range(n - length + 1):
-        if tuple(finished_codes[start : start + length]) != tail:
+        if tuple(finished_codes[start : start + length]) != pattern:
             continue
         next_idx = start + length
         if next_idx >= n:
@@ -120,9 +133,84 @@ def analyze_tail(finished_codes: list[int], length: int) -> HintRow | None:
     match_count = sum(follow_counts.values())
     return HintRow(
         length=length,
-        tail=tail,
+        tail=pattern,
         match_count=match_count,
         follow_up_counts=follow_counts,
+    )
+
+
+def finished_winner_codes(store: GameStore) -> list[int]:
+    finished_codes: list[int] = []
+    for game_id in store.list_game_ids(finished_only=True):
+        game = store.get_game(game_id)
+        if game is None or not game.winner_suit:
+            continue
+        code = winner_code(game.winner_suit)
+        if code is not None:
+            finished_codes.append(code)
+    return finished_codes
+
+
+def parse_pattern_codes(pattern: str, length: int) -> list[int] | None:
+    parts = [p.strip() for p in pattern.split(",") if p.strip()]
+    if len(parts) != length:
+        return None
+    codes: list[int] = []
+    for part in parts:
+        try:
+            code = int(part)
+        except ValueError:
+            return None
+        if code not in CODE_TO_SYMBOL:
+            return None
+        codes.append(code)
+    return codes
+
+
+def _row_payload(row: HintRow, *, summary: str) -> dict[str, Any]:
+    total = row.match_count
+    percents = {
+        str(c): (int(round(100 * row.follow_up_counts[c] / total)) if total else 0)
+        for c in (1, 2, 3, 4)
+    }
+    return {
+        "length": row.length,
+        "next_game_number": row.next_game_number,
+        "tail": list(row.tail),
+        "tail_text": row.tail_text,
+        "tail_suits": row.tail_suits,
+        "match_count": row.match_count,
+        "follow_up_counts": {str(k): v for k, v in row.follow_up_counts.items()},
+        "follow_up_percents": percents,
+        "summary": summary,
+    }
+
+
+def _search_summary(row: HintRow) -> str:
+    if row.match_count == 0:
+        return f"Pattern ({row.tail_suits}): no identical run in history yet."
+    parts = [
+        f"{_symbol(c)} {row.follow_up_counts[c]}"
+        for c in sorted(row.follow_up_counts)
+        if row.follow_up_counts[c] > 0
+    ]
+    best_code = max(
+        (c for c, v in row.follow_up_counts.items() if v > 0),
+        key=lambda c: row.follow_up_counts[c],
+    )
+    best_n = row.follow_up_counts[best_code]
+    best_suit = _symbol(best_code)
+    detail = ", ".join(parts)
+    if row.match_count == 1:
+        return (
+            f"Pattern ({row.tail_suits}): 1 past case — "
+            f"next game was {best_suit}. ({detail})"
+        )
+    best_pct = int(round(100 * best_n / row.match_count))
+    return (
+        f"Pattern ({row.tail_suits}): {row.match_count} past cases — "
+        f"next game was usually {best_suit} ({best_n}/{row.match_count}, {best_pct}%). "
+        f"({detail})"
     )
 
 
@@ -184,14 +272,7 @@ def _lead_summary(rows: list[HintRow]) -> str:
 
 def live_winner_hints(store: GameStore) -> dict[str, Any]:
     """Hints from finished-game tails (current live game is the implied next outcome)."""
-    finished_codes: list[int] = []
-    for game_id in store.list_game_ids(finished_only=True):
-        game = store.get_game(game_id)
-        if game is None or not game.winner_suit:
-            continue
-        code = winner_code(game.winner_suit)
-        if code is not None:
-            finished_codes.append(code)
+    finished_codes = finished_winner_codes(store)
 
     min_len = min(HINT_LENGTHS)
     if len(finished_codes) < min_len:
@@ -215,24 +296,7 @@ def live_winner_hints(store: GameStore) -> dict[str, Any]:
 
     payload_rows = []
     for row in rows:
-        total = row.match_count
-        percents = {
-            str(c): (int(round(100 * row.follow_up_counts[c] / total)) if total else 0)
-            for c in (1, 2, 3, 4)
-        }
-        payload_rows.append(
-            {
-                "length": row.length,
-                "next_game_number": row.next_game_number,
-                "tail": list(row.tail),
-                "tail_text": row.tail_text,
-                "tail_suits": row.tail_suits,
-                "match_count": row.match_count,
-                "follow_up_counts": {str(k): v for k, v in row.follow_up_counts.items()},
-                "follow_up_percents": percents,
-                "summary": _row_summary(row),
-            }
-        )
+        payload_rows.append(_row_payload(row, summary=_row_summary(row)))
 
     return {
         "legend": HINT_LEGEND,
@@ -248,3 +312,16 @@ def live_winner_hints_if_in_progress(store: GameStore, *, in_progress: bool) -> 
     if not in_progress:
         return None
     return live_winner_hints(store)
+
+
+def search_winner_pattern(store: GameStore, pattern: list[int]) -> dict[str, Any]:
+    """Manual history search for a user-selected winner sequence."""
+    finished_codes = finished_winner_codes(store)
+    row = search_pattern(finished_codes, tuple(pattern))
+    return {
+        "legend": HINT_LEGEND,
+        "suit_meta": SUIT_META,
+        "finished_games": len(finished_codes),
+        "pattern": list(pattern),
+        "result": _row_payload(row, summary=_search_summary(row)),
+    }

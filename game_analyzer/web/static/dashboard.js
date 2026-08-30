@@ -155,6 +155,151 @@
 
   showLive(false);
 
+  function readJsonScript(id, fallback) {
+    const el = document.getElementById(id);
+    if (!el) return fallback;
+    try {
+      return JSON.parse(el.textContent || "");
+    } catch (_err) {
+      return fallback;
+    }
+  }
+
+  function renderSearchResult(data) {
+    const panel = document.querySelector("[data-winner-search-results]");
+    const status = document.querySelector("[data-winner-search-status]");
+    const chipsEl = document.querySelector("[data-winner-search-chips]");
+    const summary = document.querySelector("[data-winner-search-summary]");
+    if (!panel || !status || !chipsEl || !summary || !data || !data.result) return;
+
+    const meta = data.suit_meta || {};
+    const row = data.result;
+    panel.hidden = false;
+    status.innerHTML =
+      "Pattern " +
+      renderTailSymbols(row.tail, meta) +
+      " · " +
+      row.match_count +
+      " match" +
+      (row.match_count === 1 ? "" : "es") +
+      (data.finished_games != null ? " · " + data.finished_games + " finished games" : "");
+
+    const counts = row.follow_up_counts || {};
+    chipsEl.innerHTML = ["1", "2", "3", "4"]
+      .map(function (code) {
+        const n = counts[code] || 0;
+        if (!n) return "";
+        const pct = row.follow_up_percents ? row.follow_up_percents[code] : 0;
+        return (
+          '<span class="winner-hint-chip" data-suit="' +
+          code +
+          '">' +
+          suitSymbol(code, meta) +
+          " " +
+          n +
+          (pct ? " (" + pct + "%)" : "") +
+          "</span>"
+        );
+      })
+      .filter(Boolean)
+      .join("");
+    summary.textContent = row.summary || "";
+  }
+
+  function initWinnerSearch() {
+    const meta = readJsonScript("winner-suit-meta", {});
+    const lengths = readJsonScript("winner-hint-lengths", [4, 5, 6, 7, 8, 9, 10]);
+    const legend = document.querySelector("[data-winner-search-legend]");
+    const pickersEl = document.querySelector("[data-winner-search-pickers]");
+    const sizeBtns = document.querySelectorAll("[data-winner-search-sizes] [data-size]");
+    const runBtn = document.querySelector("[data-winner-search-run]");
+    if (!pickersEl || !runBtn) return;
+
+    let groupSize = lengths[0] || 4;
+
+    if (legend) {
+      legend.innerHTML = "1=♠ · 2=♥ · 3=♣ · 4=♦"
+        .split(" · ")
+        .map(function (part) {
+          const m = part.match(/^(\d)=(.+)$/);
+          if (!m) return part;
+          return m[1] + "=" + suitSymbol(m[1], meta);
+        })
+        .join(" · ");
+    }
+
+    function buildPickers() {
+      pickersEl.innerHTML = "";
+      for (let i = 0; i < groupSize; i += 1) {
+        const slot = document.createElement("div");
+        slot.className = "winner-search-slot";
+        const label = document.createElement("span");
+        label.className = "winner-search-slot-label";
+        label.textContent = String(i + 1);
+        const select = document.createElement("select");
+        select.className = "winner-search-suit";
+        select.size = 4;
+        select.setAttribute("aria-label", "Winner " + (i + 1));
+        ["1", "2", "3", "4"].forEach(function (code) {
+          const opt = document.createElement("option");
+          opt.value = code;
+          const info = meta[code] || {};
+          opt.textContent = (info.symbol || code) + " " + (info.name || "");
+          if (info.color) opt.style.color = info.color;
+          select.appendChild(opt);
+        });
+        select.value = "1";
+        slot.appendChild(label);
+        slot.appendChild(select);
+        pickersEl.appendChild(slot);
+      }
+    }
+
+    function setGroupSize(size) {
+      groupSize = size;
+      sizeBtns.forEach(function (btn) {
+        btn.classList.toggle("is-active", Number(btn.getAttribute("data-size")) === size);
+      });
+      buildPickers();
+    }
+
+    sizeBtns.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        setGroupSize(Number(btn.getAttribute("data-size")));
+      });
+    });
+
+    runBtn.addEventListener("click", async function () {
+      const selects = pickersEl.querySelectorAll(".winner-search-suit");
+      const pattern = Array.from(selects).map(function (sel) {
+        return sel.value;
+      });
+      runBtn.disabled = true;
+      try {
+        const query =
+          "/api/winner-hints/search?length=" +
+          encodeURIComponent(groupSize) +
+          "&pattern=" +
+          encodeURIComponent(pattern.join(","));
+        const data = await live.get(query);
+        renderSearchResult(data);
+      } catch (_err) {
+        const panel = document.querySelector("[data-winner-search-results]");
+        const status = document.querySelector("[data-winner-search-status]");
+        if (panel && status) {
+          panel.hidden = false;
+          status.textContent = "Search failed — try again.";
+        }
+      } finally {
+        runBtn.disabled = false;
+      }
+    });
+
+    setGroupSize(groupSize);
+  }
+
+  initWinnerSearch();
+
   live.start(async function () {
     try {
       const data = await live.get("/api/live");
