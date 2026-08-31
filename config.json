@@ -61,5 +61,11 @@
       "DIAMONDS": {"top": 486, "height": 38}
     },
     "winner_green_gap": 30
+  },
+  "health": {
+    "capture_stale_seconds": 150,
+    "game_stale_seconds": 120,
+    "status_path": "data/capture_status.json",
+    "log_path": "data/capture.log"
   }
 }

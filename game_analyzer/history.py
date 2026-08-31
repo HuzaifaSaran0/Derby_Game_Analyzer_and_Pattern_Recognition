@@ -39,14 +39,6 @@ class HistoryWindow(ctk.CTkToplevel):
             info, text="Winner: —", font=("Segoe UI", 18, "bold"), anchor="w"
         )
         self.winner_label.pack(fill="x", padx=12, pady=(10, 2))
-        self.high_stats_label = ctk.CTkLabel(
-            info,
-            text="Late-round similarity: computing…",
-            font=("Segoe UI", 13),
-            anchor="w",
-            text_color="#58a6ff",
-        )
-        self.high_stats_label.pack(fill="x", padx=12, pady=(4, 2))
         self.meta_label = ctk.CTkLabel(
             info, text="", font=("Consolas", 13), anchor="w", justify="left"
         )
@@ -55,18 +47,10 @@ class HistoryWindow(ctk.CTkToplevel):
         self.shots = ctk.CTkScrollableFrame(self, label_text="Screenshots")
         self.shots.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-        self._stats_job = None
         self.reload()
 
     def reload(self) -> None:
         self.game_ids = self.store.list_game_ids(finished_only=True)
-        self.high_stats_label.configure(text="Late-round similarity: computing…")
-        if self._stats_job is not None:
-            try:
-                self.after_cancel(self._stats_job)
-            except Exception:
-                pass
-        self._stats_job = self.after(150, self._refresh_late_stats)
         if not self.game_ids:
             self.header.configure(text="No saved games yet")
             self.winner_label.configure(text="Winner: —")
@@ -75,18 +59,6 @@ class HistoryWindow(ctk.CTkToplevel):
             return
         self.index = len(self.game_ids) - 1
         self.show()
-
-    def _refresh_late_stats(self) -> None:
-        self._stats_job = None
-        from game_analyzer.similarity import friendly_late_round_summary
-
-        stats = self.store.late_round_stats()
-        r3 = next((s for s in stats if s.round_n == 3), None)
-        if r3 and r3.twin_sets:
-            text = friendly_late_round_summary([s for s in stats if s.round_n == 3])
-        else:
-            text = "Draw similarity · Round 3: no matches yet"
-        self.high_stats_label.configure(text=text)
 
     def prev(self) -> None:
         if not self.game_ids:

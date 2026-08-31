@@ -15,6 +15,7 @@ from game_analyzer.alerts import (
     alert_settings_from_config,
     read_recent_alerts,
 )
+from game_analyzer.capture_health import evaluate_capture_health, log_path_from_config, tail_capture_log
 from game_analyzer.config import load_config
 from game_analyzer.data_transfer import (
     MAX_IMPORT_BYTES,
@@ -70,6 +71,8 @@ def _is_public_path(path: str, method: str) -> bool:
     if path == "/login":
         return True
     if path == "/logout" and method == "POST":
+        return True
+    if path == "/api/health":
         return True
     return False
 
@@ -727,6 +730,24 @@ def create_app(
     @app.get("/api/stats")
     def api_stats():
         return JSONResponse(_stats_payload(store), headers=NO_CACHE)
+
+    @app.get("/api/health")
+    def api_health():
+        config = load_config()
+        payload = evaluate_capture_health(store, config=config)
+        status_code = 503 if payload.get("status") == "down" else 200
+        return JSONResponse(payload, status_code=status_code, headers=NO_CACHE)
+
+    @app.get("/api/health/logs")
+    def api_health_logs(lines: int = Query(80, ge=1, le=500)):
+        config = load_config()
+        return JSONResponse(
+            {
+                "lines": tail_capture_log(lines=lines, config=config),
+                "log_path": str(log_path_from_config(config)),
+            },
+            headers=NO_CACHE,
+        )
 
     @app.get("/api/live")
     def api_live():

@@ -255,8 +255,20 @@ def capture_once(config: dict | None = None):
     """Grab via screen box or Brave CDP, save PNG + overlay, return paths/result."""
     global _LAST_DECISION, _LAST_FRAME, _LAST_PATH, _LAST_RESULT
     global _CAPTURE_STARTED_AT, _SCHEDULE_ANCHOR_AT, _TIMER_SAMPLED_AT, _FRAME_GRABBED_AT
-    _CAPTURE_STARTED_AT = time.monotonic()
     config = config or load_config()
+    try:
+        return _capture_once_impl(config)
+    except Exception as exc:
+        from game_analyzer.capture_health import record_capture_error
+
+        record_capture_error(exc, context="capture_once failed", config=config)
+        raise
+
+
+def _capture_once_impl(config: dict):
+    global _LAST_DECISION, _LAST_FRAME, _LAST_PATH, _LAST_RESULT
+    global _CAPTURE_STARTED_AT, _SCHEDULE_ANCHOR_AT, _TIMER_SAMPLED_AT, _FRAME_GRABBED_AT
+    _CAPTURE_STARTED_AT = time.monotonic()
     SESSION_TRACKER.timing = _timing_from_config(config)
     capture = config["capture"]
     game_id = read_page_game_id(capture)
@@ -267,6 +279,17 @@ def capture_once(config: dict | None = None):
         and game_id
         and game_id == _LAST_DECISION.game_id
     ):
+        from game_analyzer.capture_health import record_capture_tick
+
+        record_capture_tick(
+            game_id=_LAST_DECISION.game_id,
+            phase=_LAST_DECISION.phase.value if _LAST_DECISION.phase else None,
+            recording=bool(_LAST_DECISION.recording),
+            in_progress=_LAST_RESULT is None or _LAST_RESULT.winner_suit is None,
+            saved=False,
+            notes="peek id only",
+            config=config,
+        )
         return _LAST_PATH, _LAST_FRAME, _LAST_RESULT, _LAST_DECISION
 
     # Sample timer before screenshot/OCR. Waiting "N seconds from capture start" after a
@@ -315,6 +338,17 @@ def capture_once(config: dict | None = None):
     _LAST_FRAME = frame
     _LAST_PATH = raw_path
     _LAST_RESULT = result
+    from game_analyzer.capture_health import record_capture_tick
+
+    record_capture_tick(
+        game_id=decision.game_id,
+        phase=decision.phase.value if decision.phase else None,
+        recording=bool(decision.recording),
+        in_progress=result.winner_suit is None,
+        saved=bool(decision.should_save),
+        notes=result.notes if result else "",
+        config=config,
+    )
     return raw_path, frame, result, decision
 
 
@@ -402,6 +436,9 @@ def grab_and_analyze(delay: float | None = None) -> None:
 
 def loop_forever(delay: float | None = None, interval: float | None = None) -> None:
     config = load_config()
+    from game_analyzer.capture_health import mark_capture_started, mark_capture_stopped, record_capture_error
+
+    mark_capture_started(source="live_loop", config=config)
     capture = config["capture"]
     wait = float(delay if delay is not None else capture.get("delay_seconds", 5))
     if timer_sync_enabled(capture):
@@ -413,32 +450,41 @@ def loop_forever(delay: float | None = None, interval: float | None = None) -> N
         f"then {sync_note}. Ctrl+C to stop."
     )
     time.sleep(wait)
-    while True:
-        if _LAST_DECISION is not None:
-            decision = _LAST_DECISION
-            if decision.watch_result:
-                outcome = _maybe_watch_result(config, decision)
-                if outcome is ResultWatchOutcome.FINISHED:
-                    if _LAST_DECISION is not None:
-                        _print_capture(
-                            (_LAST_PATH, _LAST_FRAME, _LAST_RESULT, _LAST_DECISION),
-                            config,
-                        )
-                    continue
-                if outcome is ResultWatchOutcome.NEW_ROUND:
-                    if _LAST_DECISION is not None:
-                        _print_capture(
-                            (_LAST_PATH, _LAST_FRAME, _LAST_RESULT, _LAST_DECISION),
-                            config,
-                        )
-                    continue
-                # No winner — finish remaining mid-round wait from the draw shot.
-                _wait_after_capture(config, decision)
-            else:
-                _wait_after_capture(config, decision)
+    try:
+        while True:
+            try:
+                if _LAST_DECISION is not None:
+                    decision = _LAST_DECISION
+                    if decision.watch_result:
+                        outcome = _maybe_watch_result(config, decision)
+                        if outcome is ResultWatchOutcome.FINISHED:
+                            if _LAST_DECISION is not None:
+                                _print_capture(
+                                    (_LAST_PATH, _LAST_FRAME, _LAST_RESULT, _LAST_DECISION),
+                                    config,
+                                )
+                            continue
+                        if outcome is ResultWatchOutcome.NEW_ROUND:
+                            if _LAST_DECISION is not None:
+                                _print_capture(
+                                    (_LAST_PATH, _LAST_FRAME, _LAST_RESULT, _LAST_DECISION),
+                                    config,
+                                )
+                            continue
+                        # No winner — finish remaining mid-round wait from the draw shot.
+                        _wait_after_capture(config, decision)
+                    else:
+                        _wait_after_capture(config, decision)
 
-        saved = capture_when_ready(config)
-        _print_capture(saved, config)
+                saved = capture_when_ready(config)
+                _print_capture(saved, config)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:
+                record_capture_error(exc, context="live loop tick failed", config=config)
+                time.sleep(float(capture.get("error_retry_seconds", 5)))
+    finally:
+        mark_capture_stopped(reason="loop exited", config=config)
 
 
 def print_tabs() -> None:
