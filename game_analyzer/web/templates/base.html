@@ -16,7 +16,7 @@
         <div class="site-status-row">
           <p class="sub live-note" data-live-status>Watching laptop capture</p>
           <div class="alert-bell-wrap" data-alert-wrap>
-            <button type="button" class="alert-bell-btn" data-alert-bell aria-label="Similarity twin alerts" aria-expanded="false">
+            <button type="button" class="alert-bell-btn" data-alert-bell aria-label="Winner hint alerts" aria-expanded="false">
               <svg class="alert-bell-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
                 <path fill="currentColor" d="M12 22a2.2 2.2 0 0 0 2.2-2.2h-4.4A2.2 2.2 0 0 0 12 22zm7-6.2V11a7 7 0 0 0-5-6.7V3.5a2 2 0 1 0-4 0v.8A7 7 0 0 0 5 11v4.8L3.4 17.4A1 1 0 0 0 4.1 19h15.8a1 1 0 0 0 .7-1.6L19 15.8z"/>
               </svg>
@@ -24,14 +24,14 @@
             </button>
             <div class="alert-panel" data-alert-panel hidden>
               <div class="alert-panel-head">
-                <strong>Similarity twins</strong>
+                <strong>Winner hints</strong>
                 <span class="muted" data-alert-status>Loading…</span>
               </div>
               <div class="alert-panel-controls">
                 <button type="button" class="btn btn-sm" data-alert-sound>Enable sound</button>
                 <button type="button" class="btn btn-sm" data-alert-mark-read>Mark as read</button>
               </div>
-              <p class="alert-panel-hint muted">Finished games with identical round 3 draws. Tap a notification to view details on Similar.</p>
+              <p class="alert-panel-hint muted">Live winner-pattern hints before the race ends. Tap to open Forecasts.</p>
               <div class="alert-panel-list" data-alert-list>
                 <p class="muted alert-empty">Loading notifications…</p>
               </div>
@@ -42,6 +42,7 @@
     </div>
     <nav class="site-nav" aria-label="Main">
       <a class="nav-link{% if active == 'live' %} on{% endif %}" href="/">Live</a>
+      <a class="nav-link{% if active == 'forecasts' %} on{% endif %}" href="/forecasts">Forecasts</a>
       <a class="nav-link{% if active == 'history' %} on{% endif %}" href="/history">History</a>
       <a class="nav-link{% if active == 'similar' %} on{% endif %}" href="/similar">Similar</a>
       {% if logged_in %}

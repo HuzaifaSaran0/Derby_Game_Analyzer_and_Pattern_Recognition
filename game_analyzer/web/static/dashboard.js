@@ -7,12 +7,6 @@
   const grid = document.querySelector("[data-live-grid]");
   let lastSig = "";
 
-  function setStats(stats) {
-    const el = document.querySelector("[data-sim-stats]");
-    if (!el || !stats) return;
-    el.textContent = stats.late_round_text || "No matching draw history yet";
-  }
-
   function showLive(on) {
     if (idle) {
       idle.hidden = on;
@@ -24,10 +18,9 @@
     }
   }
 
-  function suitSymbol(code, meta) {
+  function suitCode(code, meta) {
     const key = String(code);
     const info = (meta && meta[key]) || {};
-    const sym = info.symbol || key;
     const color = info.color || "";
     return (
       '<span class="winner-hint-suit"' +
@@ -35,16 +28,60 @@
       ' data-suit="' +
       key +
       '">' +
-      sym +
+      key +
       "</span>"
     );
   }
 
-  function renderTailSymbols(tail, meta) {
+  function renderTailCodes(tail, meta) {
     if (!tail || !tail.length) return "";
     return tail.map(function (code) {
-      return suitSymbol(code, meta);
+      return suitCode(code, meta);
     }).join(" ");
+  }
+
+  function renderWinnerConfidence(confidence) {
+    const el = document.querySelector("[data-winner-confidence]");
+    if (!el) return;
+    if (!confidence) {
+      el.hidden = true;
+      el.textContent = "";
+      return;
+    }
+    el.hidden = false;
+    const tier = String(confidence.tier || "NONE").toUpperCase();
+    const color = confidence.pick_color || "";
+    el.className = "winner-confidence-line tier-" + tier.toLowerCase();
+    if (tier === "LOW" || tier === "NONE") {
+      el.style.removeProperty("color");
+    } else if (color) {
+      el.style.color = color;
+    } else {
+      el.style.removeProperty("color");
+    }
+    el.textContent = confidence.summary || "";
+  }
+
+  function shortHintNote(row) {
+    const total = row.match_count || 0;
+    if (!total) return "No identical run yet";
+
+    const counts = row.follow_up_counts || {};
+    const active = ["1", "2", "3", "4"]
+      .map(function (code) {
+        return { code: code, n: counts[code] || 0 };
+      })
+      .filter(function (item) {
+        return item.n > 0;
+      })
+      .sort(function (a, b) {
+        return b.n - a.n;
+      });
+
+    if (active.length > 1 && active[0].n === active[1].n) {
+      return "Split — no clear next winner";
+    }
+    return "";
   }
 
   function renderWinnerHints(hints) {
@@ -56,20 +93,15 @@
 
     if (!hints) {
       panel.hidden = true;
+      renderWinnerConfidence(null);
       return;
     }
 
     const meta = hints.suit_meta || {};
 
     panel.hidden = false;
-    legend.innerHTML = (hints.legend || "")
-      .split(" · ")
-      .map(function (part) {
-        const m = part.match(/^(\d)=(.+)$/);
-        if (!m) return part;
-        return m[1] + "=" + suitSymbol(m[1], meta);
-      })
-      .join(" · ");
+    legend.textContent = hints.legend || "";
+    renderWinnerConfidence(hints.confidence || null);
     lead.textContent = hints.lead_summary || "";
 
     if (!hints.rows || !hints.rows.length) {
@@ -89,7 +121,7 @@
               '<span class="winner-hint-chip" data-suit="' +
               code +
               '">' +
-              suitSymbol(code, meta) +
+              suitCode(code, meta) +
               " " +
               n +
               (pct ? " (" + pct + "%)" : "") +
@@ -99,6 +131,8 @@
           .filter(Boolean)
           .join("");
 
+        const note = shortHintNote(row);
+
         return (
           '<article class="winner-hint-row">' +
           '<div class="winner-hint-head">' +
@@ -106,7 +140,7 @@
           row.length +
           "</strong>" +
           '<span class="winner-hint-tail">' +
-          renderTailSymbols(row.tail, meta) +
+          renderTailCodes(row.tail, meta) +
           "</span>" +
           '<span class="winner-hint-matches">' +
           row.match_count +
@@ -115,9 +149,7 @@
           "</span>" +
           "</div>" +
           (chips ? '<div class="winner-hint-chips">' + chips + "</div>" : "") +
-          '<p class="winner-hint-summary">' +
-          (row.summary || "") +
-          "</p>" +
+          (note ? '<p class="winner-hint-summary">' + note + "</p>" : "") +
           "</article>"
         );
       })
@@ -127,7 +159,6 @@
   function apply(data) {
     const ready = !!(data && data.ready && data.game_id);
     showLive(ready);
-    setStats(data && data.stats);
     renderWinnerHints(data && data.winner_hints);
     if (!ready) return;
 
@@ -177,7 +208,7 @@
     panel.hidden = false;
     status.innerHTML =
       "Pattern " +
-      renderTailSymbols(row.tail, meta) +
+      renderTailCodes(row.tail, meta) +
       " · " +
       row.match_count +
       " match" +
@@ -194,7 +225,7 @@
           '<span class="winner-hint-chip" data-suit="' +
           code +
           '">' +
-          suitSymbol(code, meta) +
+          suitCode(code, meta) +
           " " +
           n +
           (pct ? " (" + pct + "%)" : "") +
@@ -218,14 +249,7 @@
     let groupSize = lengths[0] || 4;
 
     if (legend) {
-      legend.innerHTML = "1=♠ · 2=♥ · 3=♣ · 4=♦"
-        .split(" · ")
-        .map(function (part) {
-          const m = part.match(/^(\d)=(.+)$/);
-          if (!m) return part;
-          return m[1] + "=" + suitSymbol(m[1], meta);
-        })
-        .join(" · ");
+      legend.textContent = "1=Spades · 2=Hearts · 3=Clubs · 4=Diamonds";
     }
 
     function buildPickers() {
@@ -244,7 +268,7 @@
           const opt = document.createElement("option");
           opt.value = code;
           const info = meta[code] || {};
-          opt.textContent = (info.symbol || code) + " " + (info.name || "");
+          opt.textContent = code;
           if (info.color) opt.style.color = info.color;
           select.appendChild(opt);
         });

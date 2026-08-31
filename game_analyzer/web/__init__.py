@@ -27,10 +27,15 @@ from game_analyzer.similarity import NEAR_SHARED_MIN, draw_round_cards, friendly
 from game_analyzer.store import GameStore
 from game_analyzer.winner_hints import (
     HINT_LENGTHS,
-    SUIT_META,
+    confidence_log_path_from_config,
+    dedupe_winner_hint_items,
+    enrich_with_game_outcome,
     live_winner_hints_if_in_progress,
+    notification_item_from_alert,
     parse_pattern_codes,
+    read_confidence_log,
     search_winner_pattern,
+    SUIT_META,
 )
 from game_analyzer.web.auth import (
     SESSION_USERNAME_KEY,
@@ -56,7 +61,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "37"
+STATIC_VER = "52"
 
 
 def _is_public_path(path: str, method: str) -> bool:
@@ -213,12 +218,25 @@ def _stats_payload(store: GameStore) -> dict:
 
 def _alerts_payload(*, limit: int = 10) -> dict:
     settings = alert_settings_from_config(load_config())
-    recent = read_recent_alerts(settings.log_path, limit=limit, similarity_only=True)
+    recent = read_recent_alerts(settings.log_path, limit=limit, winner_hint_only=True)
     return {
         "enabled": True,
-        "mode": "similarity",
+        "mode": "winner_hints",
         "latest": recent[0] if recent else None,
         "recent": recent,
+    }
+
+
+def _notifications_payload(store: GameStore) -> dict:
+    """Winner-hint alerts from the log (read/unread tracked client-side)."""
+    settings = alert_settings_from_config(load_config())
+    recent = read_recent_alerts(settings.log_path, limit=50, winner_hint_only=True)
+    items = dedupe_winner_hint_items(
+        [enrich_with_game_outcome(notification_item_from_alert(entry), store) for entry in recent]
+    )
+    return {
+        "items": items,
+        "total": len(items),
     }
 
 
@@ -261,73 +279,6 @@ def _twin_set_payload(twin_set) -> dict:
             for g in twin_set.games
         ],
         "game_ids": [g.game_id for g in twin_set.games],
-    }
-
-
-def _notifications_payload(store: GameStore) -> dict:
-    """R3 twin sets as notification items (read/unread tracked client-side)."""
-    twin_sets, excluded = store.late_round_twin_sets_partitioned()
-    finished_at: dict[str, str | None] = {}
-    with store._connect(autocommit=True) as con:
-        for row in con.execute("SELECT game_id, finished_at FROM games").fetchall():
-            finished_at[row["game_id"]] = row["finished_at"]
-
-    items: list[dict] = []
-    for twin_set in twin_sets:
-        if twin_set.stage != "R3":
-            continue
-        r3_cards = next((list(cards) for rn, cards in twin_set.round_cards if rn == 3), [])
-        game_ids = [g.game_id for g in twin_set.games]
-        cards_text = friendly_cards_text(r3_cards)
-        game_rows = []
-        for g in twin_set.games:
-            w = winner_display(g.winner_suit)
-            game_rows.append(
-                {
-                    "game_id": g.game_id,
-                    "winner": w["name"],
-                    "winner_symbol": w["symbol"],
-                    "winner_color": w["color"],
-                    "winner_label": w["label"],
-                }
-            )
-        stamps = [finished_at.get(gid) for gid in game_ids if finished_at.get(gid)]
-        at = max(stamps) if stamps else None
-        n = twin_set.size
-        if twin_set.winners_same and twin_set.majority_winner:
-            majority = winner_display(twin_set.majority_winner)
-            winner_note = f"Same winner — {majority['label']}"
-            verdict = "same"
-        elif twin_set.winners_same is False:
-            winner_note = "Different winners"
-            verdict = "different"
-        else:
-            winner_note = "Winner comparison unavailable"
-            verdict = "unknown"
-
-        items.append(
-            {
-                "id": twin_set.key,
-                "kind": "twin-r3",
-                "at": at,
-                "title": f"{n} games drew the same cards in round 3",
-                "cards_text": cards_text,
-                "link": f"/similar?set={quote(twin_set.key, safe='')}",
-                "game_ids": game_ids,
-                "games": game_rows,
-                "winners_same": twin_set.winners_same,
-                "winner_note": winner_note,
-                "verdict": verdict,
-                "trust": twin_set.trust,
-                "size": n,
-            }
-        )
-
-    items.sort(key=lambda row: row.get("at") or "", reverse=True)
-    return {
-        "items": items,
-        "total": len(items),
-        "excluded_weak": len([s for s in excluded if s.stage == "R3"]),
     }
 
 
@@ -674,6 +625,31 @@ def create_app(
             context=_ctx(request, active="similar"),
         )
 
+    @app.get("/forecasts", response_class=HTMLResponse)
+    def forecasts_page(request: Request):
+        return templates.TemplateResponse(
+            request=request,
+            name="forecasts.html",
+            context=_ctx(
+                request,
+                active="forecasts",
+                winner_suit_meta=SUIT_META,
+            ),
+        )
+
+    @app.get("/confidence")
+    def confidence_redirect(request: Request):
+        query = request.url.query
+        target = "/forecasts" + ("?" + query if query else "")
+        return RedirectResponse(url=target, status_code=302)
+
+    @app.get("/api/winner-confidence")
+    def api_winner_confidence(limit: int = Query(200, ge=1, le=500)):
+        settings_path = confidence_log_path_from_config(load_config())
+        items = read_confidence_log(settings_path, limit=limit)
+        enriched = [enrich_with_game_outcome(dict(entry), store) for entry in items]
+        return JSONResponse({"items": enriched, "total": len(enriched)}, headers=NO_CACHE)
+
     @app.get("/data", response_class=HTMLResponse)
     def data_page(request: Request):
         return templates.TemplateResponse(
@@ -775,6 +751,10 @@ def create_app(
             store,
             in_progress=payload.get("in_progress", False),
         )
+        if payload.get("in_progress"):
+            from game_analyzer.live import _maybe_winner_hint_alerts
+
+            _maybe_winner_hint_alerts(load_config(), latest_id)
         return JSONResponse(payload, headers=NO_CACHE)
 
     @app.get("/api/winner-hints/search")

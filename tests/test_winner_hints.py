@@ -90,7 +90,7 @@ def test_analyze_tail_counts_historical_follow_ups():
 
     summary = _row_summary(row)
     assert "10 past cases" in summary
-    assert "♦" in summary
+    assert "4 5" in summary or "4 won" in summary.lower() or "usually 4" in summary
 
 
 def test_analyze_tail_no_match():

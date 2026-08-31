@@ -706,38 +706,7 @@ class DemoApp(ctk.CTk):
         draw_cards: tuple[str, ...],
         game_id: str | None,
     ) -> None:
-        if not handicap_cards:
-            return
-        sim_cfg = self.config_data.get("similarity") or {}
-        if sim_cfg.get("notify", True) is False:
-            return
-        signal = self.store.live_twin_signal(
-            handicap_cards,
-            draw_cards,
-            exclude_game_id=game_id,
-        )
-        if signal is None:
-            return
-        dedupe = (
-            f"{game_id or getattr(self, '_twin_game_id', 'live')}:"
-            f"{signal.stage.value}:{signal.suggested_winner}"
-        )
-        if dedupe in self._twin_notified:
-            return
-        self._twin_notified.add(dedupe)
-
-        from datetime import datetime, timezone
-
-        from game_analyzer.notify import DEFAULT_TWIN_LOG, append_twin_log, send_desktop_notification
-
-        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        append_twin_log(DEFAULT_TWIN_LOG, f"{stamp}  {signal.message}")
-        send_desktop_notification(
-            f"Twin winner: {signal.suggested_winner}",
-            signal.message,
-            urgency="critical",
-        )
-        self._set_twin_toast(visible=True, text=signal.message)
+        return
 
 
     def start_loop(self) -> None:

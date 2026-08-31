@@ -206,25 +206,31 @@ def test_similar_and_stats_api(tmp_path: Path):
     alerts = client.get("/api/alerts").json()
     assert "latest" in alerts
     assert "enabled" in alerts
-    assert alerts.get("mode") == "similarity"
+    assert alerts.get("mode") == "winner_hints"
     notifications = client.get("/api/notifications").json()
     assert "items" in notifications
     assert "total" in notifications
     if notifications["items"]:
         item = notifications["items"][0]
-        assert item.get("link", "").startswith("/similar?set=")
-        assert "cards_text" in item
-        assert "games" in item
-        assert "winner_note" in item
-        assert "at" in item
-        assert "title" in item
-        assert "message" not in item or item.get("message") is None
+        assert item.get("kind") == "winner-hint"
+        assert item.get("link", "").startswith("/")
+        assert "patterns" in item
+        assert "headline" in item
+        assert "dedupe_key" in item
     page = client.get("/")
     assert 'data-alert-bell' in page.text
     assert "/static/alerts.js" in page.text
-    assert "Similarity twins" in page.text
+    assert "Winner hints" in page.text
     assert "data-alert-mark-read" in page.text
     assert "data-alert-push" not in page.text
+    forecasts_page = client.get("/forecasts")
+    assert forecasts_page.status_code == 200
+    assert "Forecasts" in forecasts_page.text
+    redirect = client.get("/confidence?game=100", follow_redirects=False)
+    assert redirect.status_code == 302
+    assert redirect.headers["location"] == "/forecasts?game=100"
+    confidence_api = client.get("/api/winner-confidence").json()
+    assert "items" in confidence_api
 
 
 def test_api_games_and_game_payload(tmp_path: Path):

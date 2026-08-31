@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -49,6 +50,19 @@ def is_similarity_alert(kind: str) -> bool:
     return k.startswith("twin-r") and k not in _LEGACY_ALERT_KINDS
 
 
+def is_winner_hint_alert(kind: str) -> bool:
+    k = (kind or "").strip().lower()
+    return k == "winner-hint"
+
+
+def is_modern_winner_hint_message(message: str) -> bool:
+    """Winner-hint rows we still surface in the bell (forecasts link + MEDIUM/HIGH)."""
+    text = (message or "").strip()
+    if "/forecasts?game=" not in text:
+        return False
+    return bool(re.search(r"(?:confidence|history)\s+\d+%\s+\((MEDIUM|HIGH)\)", text, re.I))
+
+
 def parse_alert_log_line(line: str) -> dict[str, str] | None:
     """Parse ``{iso}  {message}`` rows from ``alerts.log``."""
     text = line.strip()
@@ -79,17 +93,34 @@ def parse_alert_log_line(line: str) -> dict[str, str] | None:
     }
 
 
+def winner_hint_already_logged(path: Path, dedupe_key: str) -> bool:
+    """True if the log already contains this winner-hint alert."""
+    if not dedupe_key or not path.is_file():
+        return False
+    from game_analyzer.winner_hints import notification_item_from_alert
+
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    for line in reversed(lines[-400:]):
+        parsed = parse_alert_log_line(line)
+        if parsed is None or not is_winner_hint_alert(parsed.get("kind") or ""):
+            continue
+        item = notification_item_from_alert(parsed)
+        if item.get("dedupe_key") == dedupe_key:
+            return True
+    return False
+
+
 def read_recent_alerts(
     path: Path,
     *,
     limit: int = 20,
-    similarity_only: bool = True,
+    similarity_only: bool = False,
+    winner_hint_only: bool = False,
 ) -> list[dict[str, str]]:
-    """Newest-first alert entries from the log file (empty if missing).
-
-    By default only late-round similarity twins are returned — legacy
-    BET/UPGRADE/CANCEL confidence rows are skipped.
-    """
+    """Newest-first alert entries from the log file (empty if missing)."""
     if limit <= 0 or not path.is_file():
         return []
     try:
@@ -101,16 +132,26 @@ def read_recent_alerts(
         parsed = parse_alert_log_line(line)
         if parsed is None:
             continue
-        if similarity_only and not is_similarity_alert(parsed["kind"]):
+        kind = parsed.get("kind") or ""
+        if winner_hint_only and not is_winner_hint_alert(kind):
             continue
+        if winner_hint_only and not is_modern_winner_hint_message(parsed.get("message") or ""):
+            continue
+        if similarity_only and not is_similarity_alert(kind):
+            continue
+        if not winner_hint_only and not similarity_only:
+            if kind in _LEGACY_ALERT_KINDS or (
+                not is_similarity_alert(kind) and not is_winner_hint_alert(kind)
+            ):
+                continue
         entries.append(parsed)
         if len(entries) >= limit:
             break
     return entries
 
 
-def latest_alert(path: Path) -> dict[str, str] | None:
-    rows = read_recent_alerts(path, limit=1)
+def latest_alert(path: Path, *, winner_hint_only: bool = False) -> dict[str, str] | None:
+    rows = read_recent_alerts(path, limit=1, winner_hint_only=winner_hint_only)
     return rows[0] if rows else None
 
 
@@ -142,3 +183,22 @@ def deliver_similarity_alert(
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             append_alert_log(settings.log_path, f"WEBHOOK FAILED: {error} — {alert_message}")
     print(f"*** ALERT ({alert_kind}) *** {alert_message}")
+
+
+def deliver_winner_hint_alert(
+    settings: AlertSettings,
+    *,
+    alert_message: str,
+    dedupe_key: str = "",
+) -> bool:
+    """Log a live winner-history hint alert. Returns False when skipped as duplicate."""
+    if not alert_message:
+        return False
+    if dedupe_key and winner_hint_already_logged(settings.log_path, dedupe_key):
+        return False
+    deliver_similarity_alert(
+        settings,
+        alert_kind="winner-hint",
+        alert_message=alert_message,
+    )
+    return True

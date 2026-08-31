@@ -2,16 +2,10 @@
 {% block title %}Game Analyzer — Live{% endblock %}
 {% block page %}live{% endblock %}
 {% block content %}
-<section class="stats-bar">
-  <p class="stats-one-line">
-    <span data-sim-stats>loading…</span>
-  </p>
-</section>
-
 <section class="panel idle-hero" data-idle-hero>
   <h2>Game Analyzer</h2>
   <p class="idle-cta">Press <strong>Start capture</strong> on the desktop app to begin.</p>
-  <p class="idle-note">This page updates live from the laptop — preview and card table appear after the first capture. Alerts come from late-round similarity matches.</p>
+  <p class="idle-note">This page updates live from the laptop — preview and card table appear after the first capture. Alerts appear when history points to a clear next winner.</p>
 </section>
 
 <div class="live-grid" data-live-grid hidden>
@@ -36,6 +30,7 @@
   <section class="panel win-panel" data-winner-hints-panel hidden>
     <h2 class="panel-title">Winner history hints</h2>
     <p class="panel-sub winner-hints-legend" data-winner-hints-legend></p>
+    <p class="winner-confidence-line" data-winner-confidence hidden></p>
     <p class="winner-hints-lead" data-winner-hints-lead></p>
     <div class="winner-hints-rows" data-winner-hints-rows></div>
   </section>

@@ -3,12 +3,6 @@
 {% block page %}history{% endblock %}
 {% block body_attrs %}data-start-id="{{ start_id or '' }}"{% endblock %}
 {% block content %}
-<section class="stats-bar">
-  <p class="stats-one-line">
-    <span data-sim-stats>loading…</span>
-  </p>
-</section>
-
 <nav class="pager">
   <button type="button" class="btn" data-nav="prev">Previous</button>
   <button type="button" class="btn btn-latest" data-nav="latest">Latest</button>

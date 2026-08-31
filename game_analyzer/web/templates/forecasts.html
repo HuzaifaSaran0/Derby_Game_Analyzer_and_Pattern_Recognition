@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Game Analyzer — Forecasts{% endblock %}
+{% block page %}forecasts{% endblock %}
+{% block content %}
+<section class="panel confidence-head">
+  <h2 class="panel-title">Forecasts</h2>
+  <p class="panel-sub">Forecasts we made during live play when history pointed to a clear next winner — and how each game actually finished.</p>
+  <p class="panel-sub muted">Only <strong>Medium</strong> and <strong>High</strong> forecasts are shown here (the same levels that trigger alerts). Low and none are hidden.</p>
+  <p class="panel-sub winner-hints-legend">{{ winner_suit_meta and "Spades · Hearts · Clubs · Diamonds" or "" }}</p>
+</section>
+
+<section class="panel">
+  <p class="confidence-status muted" data-confidence-status>Loading…</p>
+  <div class="confidence-list" data-confidence-list></div>
+</section>
+<script type="application/json" id="winner-suit-meta">{{ winner_suit_meta | tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="/static/forecasts.js?v={{ static_ver }}"></script>
+{% endblock %}

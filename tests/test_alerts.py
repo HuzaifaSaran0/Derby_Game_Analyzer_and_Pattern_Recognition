@@ -1,4 +1,4 @@
-"""Tests for similarity alert logging (late-round twin delivery)."""
+"""Tests for alert logging (winner hints + legacy similarity rows)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,20 @@ from pathlib import Path
 from game_analyzer.alerts import (
     AlertSettings,
     deliver_similarity_alert,
+    deliver_winner_hint_alert,
+    is_modern_winner_hint_message,
     parse_alert_log_line,
     read_recent_alerts,
+    winner_hint_already_logged,
+)
+
+_MODERN_MSG = (
+    "[WINNER-HINT] Game 9 — next winner likely 3 — history 67% (MEDIUM) — "
+    "Last 4 (3 2 4 2) 3 cases → 3 (2/3, 67%) · link=/forecasts?game=9"
+)
+_LEGACY_MSG = (
+    "[WINNER-HINT] Game 9 — next winner likely 3 — "
+    "Last 4 (3 2 4 2) 3 cases → 3 (2/3, 67%) · link=/"
 )
 
 
@@ -38,22 +50,62 @@ def test_read_recent_alerts_skips_legacy_bet_rows(tmp_path: Path):
         + "\n",
         encoding="utf-8",
     )
-    recent = read_recent_alerts(log_path, limit=5)
+    recent = read_recent_alerts(log_path, limit=5, similarity_only=True)
     assert len(recent) == 1
     assert recent[0]["kind"] == "twin-r3"
-    all_rows = read_recent_alerts(log_path, limit=10, similarity_only=False)
-    assert len(all_rows) == 4
+    # Default feed keeps similarity + winner-hint rows only (skips legacy BET/CANCEL/UPGRADE).
+    all_rows = read_recent_alerts(log_path, limit=10, similarity_only=False, winner_hint_only=False)
+    assert len(all_rows) == 1
+    assert all_rows[0]["kind"] == "twin-r3"
 
 
-def test_deliver_similarity_alert_writes_log(tmp_path: Path):
+def test_is_modern_winner_hint_message():
+    assert is_modern_winner_hint_message(_MODERN_MSG)
+    assert not is_modern_winner_hint_message(_LEGACY_MSG)
+    assert not is_modern_winner_hint_message(
+        "[WINNER-HINT] Game 9 — history 67% (LOW) · link=/forecasts?game=9"
+    )
+
+
+def test_read_recent_alerts_skips_legacy_winner_hint_rows(tmp_path: Path):
+    log_path = tmp_path / "alerts.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "2026-08-27T10:00:00+00:00  " + _LEGACY_MSG,
+                "2026-08-27T11:00:00+00:00  " + _MODERN_MSG,
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    recent = read_recent_alerts(log_path, limit=5, winner_hint_only=True)
+    assert len(recent) == 1
+    assert "/forecasts?game=9" in recent[0]["message"]
+
+
+def test_deliver_winner_hint_alert_writes_log(tmp_path: Path):
     log_path = tmp_path / "alerts.log"
     settings = AlertSettings(log_path=log_path)
-    deliver_similarity_alert(
-        settings,
-        alert_kind="twin-r3",
-        alert_message="[TWIN-R3] Game 9 — 1 past game(s) match R3 draws · link=/similar?stage=r3&ids=1",
-    )
-    recent = read_recent_alerts(log_path, limit=5)
+    deliver_winner_hint_alert(settings, alert_message=_MODERN_MSG)
+    recent = read_recent_alerts(log_path, limit=5, winner_hint_only=True)
     assert recent
-    assert recent[0]["kind"] == "twin-r3"
-    assert "link=" in recent[0]["message"]
+    assert recent[0]["kind"] == "winner-hint"
+    assert "next winner likely 3" in recent[0]["message"]
+
+
+def test_winner_hint_already_logged(tmp_path: Path):
+    log_path = tmp_path / "alerts.log"
+    settings = AlertSettings(log_path=log_path)
+    deliver_winner_hint_alert(settings, alert_message=_MODERN_MSG, dedupe_key="9:next=3:4:3 2 4 2")
+    assert winner_hint_already_logged(log_path, "9:next=3:4:3 2 4 2")
+    assert not winner_hint_already_logged(log_path, "9:next=4:4:3 2 4 2")
+
+
+def test_deliver_winner_hint_alert_skips_duplicate(tmp_path: Path):
+    log_path = tmp_path / "alerts.log"
+    settings = AlertSettings(log_path=log_path)
+    key = "9:next=3:4:3 2 4 2"
+    assert deliver_winner_hint_alert(settings, alert_message=_MODERN_MSG, dedupe_key=key) is True
+    assert deliver_winner_hint_alert(settings, alert_message=_MODERN_MSG, dedupe_key=key) is False
+    assert len(read_recent_alerts(log_path, limit=5, winner_hint_only=True)) == 1

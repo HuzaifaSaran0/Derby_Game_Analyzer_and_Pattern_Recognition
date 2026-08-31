@@ -25,12 +25,6 @@
     el.classList.toggle("disabled", !id);
   }
 
-  function setStats(stats) {
-    const el = document.querySelector("[data-sim-stats]");
-    if (!el || !stats) return;
-    el.textContent = stats.late_round_text || "No matching draw history yet";
-  }
-
   function openLightbox(frames, index) {
     if (!lightbox || !frames.length) return;
     lightboxFrames = frames;
@@ -149,7 +143,6 @@
       " · " +
       shotCount +
       " shots";
-    setStats(data.stats);
     document.querySelector("[data-card-table]").innerHTML = cards.suitTable(data.table);
     resetShotsUi();
     setNav("prev", nav.prev_id);

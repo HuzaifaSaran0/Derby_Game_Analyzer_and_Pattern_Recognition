@@ -52,7 +52,7 @@
     const unread = notifs.unreadCount(items);
     const total = items.length;
     if (!total) {
-      status.textContent = "No matches yet";
+      status.textContent = "No winner hints yet";
       return;
     }
     status.textContent = unread ? unread + " unread" : "All read";
@@ -152,9 +152,85 @@
     );
   }
 
+  function renderPatterns(row) {
+    return (row.patterns || [])
+      .map(function (p) {
+        return (
+          '<p class="alert-item-pattern">' +
+          "<span class=\"alert-item-pattern-label\">Last " +
+          escapeHtml(String(p.length)) +
+          "</span> " +
+          "<code class=\"alert-item-pattern-tail\">" +
+          escapeHtml(p.tail || "") +
+          "</code> · " +
+          escapeHtml(String(p.next_count || p.match_count)) +
+          "/" +
+          escapeHtml(String(p.match_count)) +
+          " history → " +
+          escapeHtml(String(p.next_code)) +
+          " (" +
+          escapeHtml(String(p.next_pct)) +
+          "%)</p>"
+        );
+      })
+      .join("");
+  }
+
+  function renderHeadline(row) {
+    const color = row.winner_color || "#ddd";
+    const text = row.headline || row.title || "Winner hint";
+    return (
+      '<p class="alert-item-headline" style="color:' +
+      escapeAttr(color) +
+      '">' +
+      escapeHtml(text) +
+      "</p>"
+    );
+  }
+
+  function renderTier(row) {
+    const tier = String(row.tier || "").toUpperCase();
+    if (!tier || tier === "NONE") return "";
+    const cls =
+      tier === "HIGH" ? "is-high" : tier === "MEDIUM" ? "is-medium" : "is-low";
+    return (
+      '<span class="alert-confidence-tier ' +
+      cls +
+      '">' +
+      escapeHtml(tier) +
+      "</span>"
+    );
+  }
+
+  function renderConfidence(row) {
+    if (!row.confidence_note) return "";
+    return (
+      '<p class="alert-item-confidence muted">' +
+      escapeHtml(row.confidence_note) +
+      "</p>"
+    );
+  }
+
+  function renderOutcome(row) {
+    if (!row.outcome_text) return "";
+    const ok = row.pick_correct === true;
+    const bad = row.pick_correct === false;
+    const cls = ok ? "is-correct" : bad ? "is-wrong" : "is-neutral";
+    const color = row.actual_winner_color || "";
+    return (
+      '<p class="alert-item-outcome ' +
+      cls +
+      '"' +
+      (color ? ' style="color:' + escapeAttr(color) + '"' : "") +
+      ">" +
+      escapeHtml(row.outcome_text) +
+      "</p>"
+    );
+  }
+
   function renderList() {
     if (!items.length) {
-      list.innerHTML = '<p class="muted alert-empty">No matching round 3 games yet.</p>';
+      list.innerHTML = '<p class="muted alert-empty">No winner hint alerts yet.</p>';
       if (markReadBtn) markReadBtn.disabled = true;
       return;
     }
@@ -163,31 +239,30 @@
       .map(function (row) {
         const read = notifs.isRead(row.id);
         const cls = read ? "is-read" : "is-unread";
+        const kind = (row.kind || "winner-hint").toLowerCase();
         return (
-          '<article class="alert-item is-twin-r3 is-link ' +
+          '<article class="alert-item is-winner-hint is-link ' +
           cls +
           '" data-notif-id="' +
           escapeAttr(row.id) +
           '" data-notif-link="' +
-          escapeAttr(row.link || "/similar") +
+          escapeAttr(row.link || "/") +
           '" role="link" tabindex="0">' +
           '<div class="alert-item-top">' +
-          '<span class="alert-item-kind">Round 3 match</span>' +
+          '<span class="alert-item-kind">Winner hint</span>' +
+          renderTier(row) +
           '<span class="alert-item-when">' +
           escapeHtml(formatWhen(row.at)) +
           "</span>" +
           (read ? "" : '<span class="alert-item-dot" aria-hidden="true"></span>') +
           "</div>" +
-          '<p class="alert-item-title">' +
-          escapeHtml(row.title || "Round 3 match") +
+          '<p class="alert-item-game muted">Live game #' +
+          escapeHtml(row.game_id || "?") +
           "</p>" +
-          '<p class="alert-item-cards"><span class="alert-item-cards-label">Cards drawn:</span> ' +
-          escapeHtml(row.cards_text || "—") +
-          "</p>" +
-          '<div class="alert-item-games">' +
-          renderGames(row) +
-          "</div>" +
-          renderVerdict(row) +
+          renderHeadline(row) +
+          renderConfidence(row) +
+          renderOutcome(row) +
+          renderPatterns(row) +
           "</article>"
         );
       })
@@ -213,7 +288,7 @@
     });
   }
 
-  function detectNewItems(nextItems) {
+  function detectNewItems(nextItems, options) {
     const ids = nextItems.map(function (row) {
       return row.id;
     });
@@ -231,12 +306,12 @@
       }
     });
     notifs.saveKnown(known);
-    if (hasNew && soundOn) playAlertBeep();
+    if (hasNew && soundOn && !(options && options.skipBeep)) playAlertBeep();
   }
 
-  function applyItems(nextItems) {
+  function applyItems(nextItems, options) {
     items = nextItems || [];
-    detectNewItems(items);
+    detectNewItems(items, options);
     updateBadge();
     updateStatus();
     if (open) renderList();
@@ -275,10 +350,10 @@
     }
   }
 
-  async function refreshNotifications() {
+  async function refreshNotifications(options) {
     try {
       const data = await live.get("/api/notifications");
-      applyItems(data.items || []);
+      applyItems(data.items || [], options);
     } catch (_e) {}
   }
 
@@ -288,7 +363,7 @@
       const latest = data && data.latest;
       if (!latest || !latest.id) return;
       const kind = (latest.kind || "").toLowerCase();
-      if (kind.indexOf("twin-r") !== 0) return;
+      if (kind !== "winner-hint") return;
       if (!livePrimed) {
         livePrimed = true;
         lastLiveAlertId = latest.id;
@@ -297,7 +372,7 @@
       }
       if (latest.id === lastLiveAlertId) return;
       lastLiveAlertId = latest.id;
-      await refreshNotifications();
+      await refreshNotifications({ skipBeep: true });
       if (soundOn) playAlertBeep();
       if (navigator.vibrate) {
         try {

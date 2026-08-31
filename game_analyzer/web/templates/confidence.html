@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Game Analyzer — Winner confidence{% endblock %}
+{% block page %}confidence{% endblock %}
+{% block content %}
+<section class="panel confidence-head">
+  <h2 class="panel-title">Winner confidence</h2>
+  <p class="panel-sub">Combined confidence for each live game — all tiers logged. Notifications fire for MEDIUM and HIGH only.</p>
+  <p class="panel-sub winner-hints-legend">{{ winner_suit_meta and "1=Spades · 2=Hearts · 3=Clubs · 4=Diamonds" or "" }}</p>
+</section>
+
+<section class="panel">
+  <p class="confidence-status muted" data-confidence-status>Loading…</p>
+  <div class="confidence-list" data-confidence-list></div>
+</section>
+<script type="application/json" id="winner-suit-meta">{{ winner_suit_meta | tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="/static/confidence.js?v={{ static_ver }}"></script>
+{% endblock %}

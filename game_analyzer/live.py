@@ -18,7 +18,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from game_analyzer.alerts import alert_settings_from_config, deliver_similarity_alert
+from game_analyzer.alerts import alert_settings_from_config, deliver_winner_hint_alert, winner_hint_already_logged
 from game_analyzer.capture import grab_frame, list_brave_tabs, list_monitors, read_page_game_id, read_page_timer
 from game_analyzer.config import load_config
 from game_analyzer.models import GamePhase
@@ -49,10 +49,10 @@ _CAPTURE_STARTED_AT: float | None = None
 _SCHEDULE_ANCHOR_AT: float | None = None
 _TIMER_SAMPLED_AT: float | None = None
 _FRAME_GRABBED_AT: float | None = None
-# Late-round (R3+) twin alerts: dedupe per live game / round.
-_LATE_ROUND_GAME_ID: str | None = None
-_LATE_ROUND_ALERTED: set[str] = set()
-_LAST_LATE_SIGNALS: dict[int, object] = {}
+# Live winner-hint alerts: dedupe per in-progress game / next-winner code.
+_HINT_GAME_ID: str | None = None
+_HINT_ALERTED: set[str] = set()
+_CONFIDENCE_LOGGED: set[str] = set()
 _RETAKE_PREVIEW_HOOK: Callable[[Path, object, str | None], None] | None = None
 
 
@@ -88,59 +88,92 @@ def _should_dual_retry(saved) -> bool:
     return decision.reason == "same cards — wait for next round"
 
 
-def _maybe_late_round_alerts(config: dict, decision: SessionDecision) -> None:
-    """Alert when R3/R4/R5 draw cards exactly match past games (cascade).
+def _resolve_confidence_outcome(config: dict, game_id: str, winner_suit: str) -> None:
+    from game_analyzer.winner_hints import confidence_log_path_from_config, resolve_confidence_log_outcome
 
-    Independent of handicap twin browsing.
-    """
-    global _LATE_ROUND_GAME_ID, _LATE_ROUND_ALERTED, _LAST_LATE_SIGNALS
-    sim = config.get("similarity") or {}
-    if sim.get("notify", True) is False:
-        return
-    if sim.get("late_rounds", True) is False:
-        return
-    if not decision.recording or not decision.should_save:
-        return
-    draws = tuple(decision.drawn_cards or ())
-    if not draws:
-        return
+    path = confidence_log_path_from_config(config)
+    resolve_confidence_log_outcome(path, game_id, winner_suit)
 
-    from game_analyzer.similarity import (
-        LATE_ROUND_MAX,
-        LATE_ROUND_MIN,
-        full_draw_rounds,
+
+def _maybe_winner_hint_alerts(config: dict, game_id: str | None) -> None:
+    """Log live confidence and alert when tier is MEDIUM or HIGH."""
+    global _HINT_GAME_ID, _HINT_ALERTED, _CONFIDENCE_LOGGED
+    if not game_id:
+        return
+    hints_cfg = config.get("winner_hints") or {}
+    if hints_cfg.get("notify", True) is False and hints_cfg.get("confidence_log", True) is False:
+        return
+    if game_id != _HINT_GAME_ID:
+        _HINT_GAME_ID = game_id
+        _HINT_ALERTED = set()
+
+    from game_analyzer.winner_hints import (
+        analyze_tail,
+        append_confidence_log,
+        build_confidence_log_entry,
+        compute_live_confidence,
+        confidence_already_logged,
+        confidence_log_path_from_config,
+        finished_winner_codes,
+        format_winner_hint_alert_message,
+        HINT_LENGTHS,
+        notifiable_winner_hint_groups,
+        NOTIFY_TIERS,
+        winner_hint_dedupe_key,
     )
 
-    game_id = decision.game_id
-    if game_id and game_id != _LATE_ROUND_GAME_ID:
-        _LATE_ROUND_GAME_ID = game_id
-        _LATE_ROUND_ALERTED = set()
-        _LAST_LATE_SIGNALS = {}
-
-    rounds_seen = full_draw_rounds(draws)
-    if rounds_seen < LATE_ROUND_MIN:
+    finished_codes = finished_winner_codes(GAME_STORE)
+    if len(finished_codes) < min(HINT_LENGTHS):
         return
+    rows = []
+    for length in HINT_LENGTHS:
+        row = analyze_tail(finished_codes, length)
+        if row is not None:
+            rows.append(row)
 
-    max_round = int(sim.get("late_round_max", LATE_ROUND_MAX))
-    signals = GAME_STORE.late_round_cascade(
-        draws,
-        live_game_id=game_id,
-        max_round=max_round,
-    )
-    settings = alert_settings_from_config(config)
-    for round_n, signal in signals.items():
-        if round_n < LATE_ROUND_MIN:
-            continue
-        dedupe = f"{game_id or 'live'}:{round_n}"
-        if dedupe in _LATE_ROUND_ALERTED:
-            continue
-        _LATE_ROUND_ALERTED.add(dedupe)
-        _LAST_LATE_SIGNALS[round_n] = signal
-        deliver_similarity_alert(
-            settings,
-            alert_kind=signal.kind,
-            alert_message=signal.message,
+    confidence = compute_live_confidence(rows)
+    confidence_path = confidence_log_path_from_config(config)
+    log_confidence = hints_cfg.get("confidence_log", True) is not False
+    if (
+        log_confidence
+        and game_id not in _CONFIDENCE_LOGGED
+        and not confidence_already_logged(confidence_path, game_id)
+    ):
+        notified = confidence.tier in NOTIFY_TIERS and bool(confidence.supporting_patterns)
+        append_confidence_log(
+            confidence_path,
+            build_confidence_log_entry(
+                game_id=game_id,
+                confidence=confidence,
+                rows=rows,
+                notified=notified,
+            ),
         )
+        _CONFIDENCE_LOGGED.add(game_id)
+
+    if hints_cfg.get("notify", True) is False:
+        return
+
+    groups = notifiable_winner_hint_groups(rows)
+    if not groups:
+        return
+
+    settings = alert_settings_from_config(config)
+    for next_code, patterns in groups.items():
+        dedupe = winner_hint_dedupe_key(game_id, patterns)
+        if dedupe in _HINT_ALERTED:
+            continue
+        if winner_hint_already_logged(settings.log_path, dedupe):
+            _HINT_ALERTED.add(dedupe)
+            continue
+        message = format_winner_hint_alert_message(
+            game_id,
+            patterns,
+            confidence_pct=confidence.confidence_pct,
+            tier=confidence.tier,
+        )
+        if deliver_winner_hint_alert(settings, alert_message=message, dedupe_key=dedupe):
+            _HINT_ALERTED.add(dedupe)
 
 
 def _retake_delay_seconds(capture: dict, phase: GamePhase) -> float | None:
@@ -271,7 +304,10 @@ def capture_once(config: dict | None = None):
         GAME_STORE.record(decision, result, raw_path, captured_at)
         # Anchor fixed 32/37 schedule waits to saved shots (not result-window peeks).
         _SCHEDULE_ANCHOR_AT = _CAPTURE_STARTED_AT
-        _maybe_late_round_alerts(config, decision)
+        if decision.phase == GamePhase.FINISHED and result.winner_suit and decision.game_id:
+            _resolve_confidence_outcome(config, decision.game_id, result.winner_suit)
+        if decision.phase != GamePhase.FINISHED and not result.winner_suit:
+            _maybe_winner_hint_alerts(config, decision.game_id)
         # ~9s later the back/lay table is on screen: swap the PNG in place (analysis
         # above already ran on this frame; timing of the next shot is unaffected).
         _schedule_lay_back_retake(config, decision, raw_path)
