@@ -64,6 +64,132 @@
     return "";
   }
 
+  function suitCodeBadge(code) {
+    const key = String(code);
+    const info = meta[key] || {};
+    const color = info.color || "";
+    return (
+      '<span class="winner-hint-suit"' +
+      (color ? ' style="color:' + escapeHtml(color) + '"' : "") +
+      ">" +
+      escapeHtml(key) +
+      "</span>"
+    );
+  }
+
+  function formatTailAsWinners(tail) {
+    const text = String(tail || "").trim();
+    if (!text) return "—";
+    return text.replace(/\s+/g, " ");
+  }
+
+  function pickCode(item) {
+    if (item.pick != null && item.pick !== "") {
+      return String(item.pick);
+    }
+    return "";
+  }
+
+  function winnerCode(item, kind) {
+    if (kind === "actual") {
+      if (item.actual_winner != null && item.actual_winner !== "") {
+        return String(item.actual_winner);
+      }
+    }
+    return pickCode(item);
+  }
+
+  function renderPatterns(patterns) {
+    if (!patterns || !patterns.length) {
+      return "";
+    }
+    return (
+      '<div class="confidence-patterns-block">' +
+      '<p class="confidence-meta muted">Pattern(s) that matched in history:</p>' +
+      patterns
+        .map(function (p) {
+          const winners = formatTailAsWinners(p.tail);
+          const cases = p.match_count || 0;
+          const hits = p.next_count || 0;
+          const pct = p.next_pct || 0;
+          const caseWord = cases === 1 ? "game" : "games";
+          return (
+            '<p class="confidence-pattern">' +
+            "<strong>Last " +
+            escapeHtml(String(p.length)) +
+            " winners:</strong> <code>" +
+            escapeHtml(winners) +
+            "</code><br>" +
+            "In " +
+            escapeHtml(String(cases)) +
+            " similar " +
+            caseWord +
+            ", next winner was " +
+            suitCodeBadge(p.next_code) +
+            " " +
+            escapeHtml(String(hits)) +
+            "/" +
+            escapeHtml(String(cases)) +
+            " (" +
+            escapeHtml(String(pct)) +
+            "%)</p>"
+          );
+        })
+        .join("") +
+      "</div>"
+    );
+  }
+
+  function renderAllRows(rows) {
+    if (!rows || !rows.length) {
+      return "";
+    }
+    const lines = rows
+      .map(function (row) {
+        const matches = row.match_count || 0;
+        const winners = formatTailAsWinners(row.tail);
+        if (!matches) {
+          return (
+            '<p class="confidence-row-snap muted">' +
+            "<strong>Last " +
+            escapeHtml(String(row.length)) +
+            ":</strong> <code>" +
+            escapeHtml(winners) +
+            "</code> · no similar games in history</p>"
+          );
+        }
+        const best = row.best_next_code
+          ? suitCodeBadge(row.best_next_code) +
+            " " +
+            escapeHtml(String(row.best_next_count || 0)) +
+            "/" +
+            escapeHtml(String(matches)) +
+            " (" +
+            escapeHtml(String(row.best_next_pct || 0)) +
+            "%)"
+          : "—";
+        return (
+          '<p class="confidence-row-snap">' +
+          "<strong>Last " +
+          escapeHtml(String(row.length)) +
+          ":</strong> <code>" +
+          escapeHtml(winners) +
+          "</code> · " +
+          escapeHtml(String(matches)) +
+          " similar game(s) · best next " +
+          best +
+          "</p>"
+        );
+      })
+      .join("");
+    return (
+      '<details class="confidence-details">' +
+      "<summary>All history lengths checked (4–10 past winners)</summary>" +
+      lines +
+      "</details>"
+    );
+  }
+
   function hasOutcome(item) {
     return Boolean(
       item.outcome_text || item.actual_winner_label || item.actual_winner != null
@@ -132,8 +258,8 @@
   }
 
   function formatOutcome(item) {
-    const actual = item.actual_winner_label || "";
-    const predicted = item.pick_label || "";
+    const actual = winnerCode(item, "actual");
+    const predicted = pickCode(item);
     if (!actual && item.outcome_text) {
       return item.outcome_text.replace(/\s*\(\d+\)/g, "");
     }
@@ -150,7 +276,7 @@
   function renderItem(item) {
     const tier = String(item.tier || "NONE").toUpperCase();
     const pick = item.pick;
-    const pickLabel = item.pick_label || "—";
+    const pickCodeText = pick != null && pick !== "" ? String(pick) : "—";
     const pickColor = (meta[String(pick)] && meta[String(pick)].color) || "#ddd";
     const gameId = String(item.game_id || "");
     const label = tierLabel(tier);
@@ -176,8 +302,17 @@
       escapeHtml(pickColor) +
       '">' +
       "Likely next winner: " +
-      escapeHtml(pickLabel) +
+      escapeHtml(pickCodeText) +
       "</p>" +
+      '<p class="confidence-meta muted">' +
+      escapeHtml(String(item.confidence_pct || 0)) +
+      "% from history · " +
+      escapeHtml(String(item.total_cases || 0)) +
+      " similar game(s)" +
+      (item.has_conflict ? " · mixed signals" : "") +
+      "</p>" +
+      renderPatterns(item.patterns || []) +
+      renderAllRows(item.all_rows || []) +
       (hasOutcome(item)
         ? '<p class="confidence-outcome' +
           (item.pick_correct === true

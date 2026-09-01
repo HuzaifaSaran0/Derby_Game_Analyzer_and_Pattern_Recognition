@@ -62,7 +62,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "52"
+STATIC_VER = "54"
 
 
 def _is_public_path(path: str, method: str) -> bool:

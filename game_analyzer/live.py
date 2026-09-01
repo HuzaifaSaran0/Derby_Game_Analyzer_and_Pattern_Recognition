@@ -116,6 +116,7 @@ def _maybe_winner_hint_alerts(config: dict, game_id: str | None) -> None:
         confidence_log_path_from_config,
         finished_winner_codes,
         format_winner_hint_alert_message,
+        format_winner_hint_push_message,
         HINT_LENGTHS,
         notifiable_winner_hint_groups,
         NOTIFY_TIERS,
@@ -172,7 +173,19 @@ def _maybe_winner_hint_alerts(config: dict, game_id: str | None) -> None:
             confidence_pct=confidence.confidence_pct,
             tier=confidence.tier,
         )
-        if deliver_winner_hint_alert(settings, alert_message=message, dedupe_key=dedupe):
+        push_message = format_winner_hint_push_message(
+            game_id,
+            patterns,
+            confidence_pct=confidence.confidence_pct,
+            tier=confidence.tier,
+            public_base_url=settings.public_base_url,
+        )
+        if deliver_winner_hint_alert(
+            settings,
+            alert_message=message,
+            push_message=push_message,
+            dedupe_key=dedupe,
+        ):
             _HINT_ALERTED.add(dedupe)
 
 

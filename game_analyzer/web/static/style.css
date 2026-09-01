@@ -378,6 +378,10 @@ a { color: var(--accent); }
   margin: 4px 0 0;
   font-size: 0.84rem;
 }
+.confidence-patterns-block {
+  margin-top: 0.35rem;
+}
+
 .confidence-pattern,
 .confidence-row-snap {
   margin: 4px 0 0;

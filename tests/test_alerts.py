@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from game_analyzer.alerts import (
     AlertSettings,
+    deliver_push_notifications,
     deliver_similarity_alert,
     deliver_winner_hint_alert,
     is_modern_winner_hint_message,
     parse_alert_log_line,
+    post_discord_webhook,
+    post_telegram_message,
+    post_webhook,
+    push_channels_configured,
     read_recent_alerts,
     winner_hint_already_logged,
 )
@@ -109,3 +115,56 @@ def test_deliver_winner_hint_alert_skips_duplicate(tmp_path: Path):
     assert deliver_winner_hint_alert(settings, alert_message=_MODERN_MSG, dedupe_key=key) is True
     assert deliver_winner_hint_alert(settings, alert_message=_MODERN_MSG, dedupe_key=key) is False
     assert len(read_recent_alerts(log_path, limit=5, winner_hint_only=True)) == 1
+
+
+def test_push_channels_configured():
+    assert not push_channels_configured(AlertSettings())
+    assert push_channels_configured(AlertSettings(webhook_url="https://hooks.slack.com/x"))
+    assert push_channels_configured(
+        AlertSettings(telegram_bot_token="123:abc", telegram_chat_id="999")
+    )
+
+
+@patch("game_analyzer.alerts._post_json")
+def test_deliver_push_notifications_all_channels(mock_post: MagicMock):
+    settings = AlertSettings(
+        webhook_url="https://hooks.slack.com/slack",
+        discord_webhook_url="https://discord.com/api/webhooks/x",
+        telegram_bot_token="123:abc",
+        telegram_chat_id="999",
+    )
+    errors = deliver_push_notifications(settings, "Hello forecast")
+    assert errors == []
+    assert mock_post.call_count == 3
+    slack_url, slack_payload = mock_post.call_args_list[0][0]
+    assert slack_payload == {"text": "Hello forecast"}
+    discord_url, discord_payload = mock_post.call_args_list[1][0]
+    assert discord_payload == {"content": "Hello forecast"}
+    tg_url, tg_payload = mock_post.call_args_list[2][0]
+    assert "sendMessage" in tg_url
+    assert tg_payload["chat_id"] == "999"
+    assert tg_payload["text"] == "Hello forecast"
+
+
+@patch("game_analyzer.alerts.deliver_push_notifications", return_value=[])
+def test_deliver_winner_hint_alert_sends_push_message(mock_push: MagicMock, tmp_path: Path):
+    log_path = tmp_path / "alerts.log"
+    settings = AlertSettings(
+        log_path=log_path,
+        webhook_url="https://hooks.slack.com/slack",
+    )
+    push_text = "Strong forecast — HIGH confidence\nGame #9"
+    deliver_winner_hint_alert(
+        settings,
+        alert_message=_MODERN_MSG,
+        push_message=push_text,
+    )
+    mock_push.assert_called_once_with(settings, push_text)
+
+
+@patch("game_analyzer.alerts._post_json")
+def test_post_helpers(mock_post: MagicMock):
+    post_webhook("https://hooks.slack.com/x", "msg")
+    post_discord_webhook("https://discord.com/x", "msg")
+    post_telegram_message("tok", "42", "msg")
+    assert mock_post.call_count == 3

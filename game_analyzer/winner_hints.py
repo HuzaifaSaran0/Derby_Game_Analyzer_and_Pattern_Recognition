@@ -927,6 +927,38 @@ def winner_forecast_link(game_id: str) -> str:
     return f"/forecasts?game={quote(str(game_id), safe='')}"
 
 
+def format_winner_hint_push_message(
+    game_id: str,
+    patterns: list[WinnerHintAlertPattern],
+    *,
+    confidence_pct: int = 0,
+    tier: str = "MEDIUM",
+    public_base_url: str = "",
+) -> str:
+    """Plain-text message for Telegram / Slack / Discord / SMS-style push."""
+    if not patterns:
+        return ""
+    next_code = patterns[0].next_code
+    tier_upper = (tier or "MEDIUM").upper()
+    if tier_upper == "HIGH":
+        lead = "Strong forecast — HIGH confidence"
+    else:
+        lead = "Good forecast — MEDIUM confidence"
+    link = winner_forecast_link(game_id)
+    base = (public_base_url or "").strip().rstrip("/")
+    if base:
+        link = f"{base}{link}"
+    return "\n".join(
+        [
+            lead,
+            f"Game #{game_id}",
+            f"Likely next winner: {next_code}",
+            f"Historical hit rate: {confidence_pct}%",
+            f"Open forecasts: {link}",
+        ]
+    )
+
+
 def format_winner_hint_alert_message(
     game_id: str,
     patterns: list[WinnerHintAlertPattern],

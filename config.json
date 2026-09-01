@@ -37,7 +37,17 @@
   "draw_overlays": false,
   "alerts": {
     "webhook_url": "",
+    "discord_webhook_url": "",
+    "public_base_url": "",
+    "telegram": {
+      "bot_token": "",
+      "chat_id": ""
+    },
     "log_path": "data/alerts.log"
+  },
+  "winner_hints": {
+    "notify": true,
+    "confidence_log": true
   },
   "similarity": {
     "notify": true,

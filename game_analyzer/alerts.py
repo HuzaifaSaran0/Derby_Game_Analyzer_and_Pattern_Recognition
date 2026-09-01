@@ -18,6 +18,10 @@ DEFAULT_LOG = ROOT / "data" / "alerts.log"
 @dataclass(frozen=True)
 class AlertSettings:
     webhook_url: str = ""
+    discord_webhook_url: str = ""
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    public_base_url: str = ""
     log_path: Path = DEFAULT_LOG
 
 
@@ -25,10 +29,19 @@ def alert_settings_from_config(config: dict[str, Any]) -> AlertSettings:
     """Read notify paths from config.alerts or config.similarity."""
     raw = config.get("alerts") or {}
     sim = config.get("similarity") or {}
+    tg = raw.get("telegram") or {}
     log_path = raw.get("log_path") or sim.get("log_path")
     webhook = str(raw.get("webhook_url") or sim.get("webhook_url") or "").strip()
+    discord = str(raw.get("discord_webhook_url") or "").strip()
+    tg_token = str(tg.get("bot_token") or raw.get("telegram_bot_token") or "").strip()
+    tg_chat = str(tg.get("chat_id") or raw.get("telegram_chat_id") or "").strip()
+    public_base = str(raw.get("public_base_url") or "").strip()
     return AlertSettings(
         webhook_url=webhook,
+        discord_webhook_url=discord,
+        telegram_bot_token=tg_token,
+        telegram_chat_id=tg_chat,
+        public_base_url=public_base,
         log_path=Path(log_path) if log_path else DEFAULT_LOG,
     )
 
@@ -155,16 +168,61 @@ def latest_alert(path: Path, *, winner_hint_only: bool = False) -> dict[str, str
     return rows[0] if rows else None
 
 
-def post_webhook(url: str, message: str) -> None:
-    payload = json.dumps({"text": message}).encode("utf-8")
+def _post_json(url: str, payload: dict[str, Any]) -> None:
+    body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         url,
-        data=payload,
+        data=body,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=10) as response:
         response.read()
+
+
+def post_webhook(url: str, message: str) -> None:
+    """Slack-style incoming webhook (``{"text": ...}``)."""
+    _post_json(url, {"text": message})
+
+
+def post_discord_webhook(url: str, message: str) -> None:
+    _post_json(url, {"content": message})
+
+
+def post_telegram_message(bot_token: str, chat_id: str, message: str) -> None:
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    _post_json(url, {"chat_id": chat_id, "text": message})
+
+
+def push_channels_configured(settings: AlertSettings) -> bool:
+    return bool(
+        settings.webhook_url
+        or settings.discord_webhook_url
+        or (settings.telegram_bot_token and settings.telegram_chat_id)
+    )
+
+
+def deliver_push_notifications(settings: AlertSettings, message: str) -> list[str]:
+    """Send a plain-text alert to every configured push channel. Returns error strings."""
+    if not message.strip():
+        return []
+    errors: list[str] = []
+    if settings.webhook_url:
+        try:
+            post_webhook(settings.webhook_url, message)
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            errors.append(f"Slack/webhook: {error}")
+    if settings.discord_webhook_url:
+        try:
+            post_discord_webhook(settings.discord_webhook_url, message)
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            errors.append(f"Discord: {error}")
+    if settings.telegram_bot_token and settings.telegram_chat_id:
+        try:
+            post_telegram_message(settings.telegram_bot_token, settings.telegram_chat_id, message)
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            errors.append(f"Telegram: {error}")
+    return errors
 
 
 def deliver_similarity_alert(
@@ -189,6 +247,7 @@ def deliver_winner_hint_alert(
     settings: AlertSettings,
     *,
     alert_message: str,
+    push_message: str = "",
     dedupe_key: str = "",
 ) -> bool:
     """Log a live winner-history hint alert. Returns False when skipped as duplicate."""
@@ -196,9 +255,10 @@ def deliver_winner_hint_alert(
         return False
     if dedupe_key and winner_hint_already_logged(settings.log_path, dedupe_key):
         return False
-    deliver_similarity_alert(
-        settings,
-        alert_kind="winner-hint",
-        alert_message=alert_message,
-    )
+    append_alert_log(settings.log_path, alert_message)
+    mobile_text = (push_message or alert_message).strip()
+    if push_channels_configured(settings):
+        for error in deliver_push_notifications(settings, mobile_text):
+            append_alert_log(settings.log_path, f"WEBHOOK FAILED: {error} — {mobile_text}")
+    print(f"*** ALERT (winner-hint) *** {alert_message}")
     return True

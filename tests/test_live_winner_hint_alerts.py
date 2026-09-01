@@ -16,6 +16,7 @@ from game_analyzer.winner_hints import (
     compute_live_confidence,
     dedupe_winner_hint_items,
     format_winner_hint_alert_message,
+    format_winner_hint_push_message,
     notifiable_winner_hint_groups,
     notification_item_from_alert,
     NOTIFY_TIERS,
@@ -128,6 +129,33 @@ def test_format_and_parse_winner_hint_alert_message():
     assert item["confidence_note"]
     assert item["dedupe_key"].startswith("105:next=3:")
     assert item["link"] == "/forecasts?game=105"
+
+
+def test_format_winner_hint_push_message():
+    from game_analyzer.winner_hints import WinnerHintAlertPattern
+
+    patterns = [
+        WinnerHintAlertPattern(
+            length=4,
+            tail_text="3 2 4 2",
+            match_count=3,
+            next_code=3,
+            next_count=2,
+            next_pct=67,
+        )
+    ]
+    text = format_winner_hint_push_message(
+        "105",
+        patterns,
+        confidence_pct=67,
+        tier="HIGH",
+        public_base_url="https://my-vps.example.com",
+    )
+    assert "Strong forecast" in text
+    assert "Game #105" in text
+    assert "Likely next winner: 3" in text
+    assert "67%" in text
+    assert "https://my-vps.example.com/forecasts?game=105" in text
 
 
 def test_dedupe_winner_hint_items_keeps_newest():

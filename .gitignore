@@ -16,6 +16,7 @@ data/session_secret
 data/similarity_cache.json
 data/capture.log
 data/capture_status.json
+config.local.json
 
 # Full game screenshots — keep locally, do not publish
 fixtures/live/
