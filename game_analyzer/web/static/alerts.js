@@ -39,7 +39,7 @@
       return;
     }
     badge.hidden = false;
-    badge.textContent = count > 9 ? "9+" : String(count);
+    badge.textContent = String(count);
     bell.classList.add("has-new");
   }
 

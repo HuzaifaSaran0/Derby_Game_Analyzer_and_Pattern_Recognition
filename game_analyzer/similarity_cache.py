@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -201,13 +203,36 @@ def load_cache(path: Path = DEFAULT_CACHE_PATH) -> dict[str, Any] | None:
     return doc if isinstance(doc, dict) else None
 
 
+DEFAULT_CACHE_PATH = ROOT / "data" / "similarity_cache.json"
+_CACHE_WRITE_LOCK = threading.Lock()
+_CACHE_SAVE_RETRIES = 8
+
+
 def save_cache(doc: dict[str, Any], path: Path = DEFAULT_CACHE_PATH) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as handle:
-        json.dump(doc, handle, indent=2)
-        handle.write("\n")
-    tmp.replace(path)
+    payload = json.dumps(doc, indent=2) + "\n"
+    last_error: OSError | None = None
+    with _CACHE_WRITE_LOCK:
+        for attempt in range(_CACHE_SAVE_RETRIES):
+            try:
+                tmp.write_text(payload, encoding="utf-8")
+                tmp.replace(path)
+                return
+            except OSError as error:
+                last_error = error
+                winerror = getattr(error, "winerror", None)
+                if winerror not in {32, 5} and not isinstance(error, PermissionError):
+                    raise
+                if attempt + 1 >= _CACHE_SAVE_RETRIES:
+                    break
+                time.sleep(0.05 * (2**attempt))
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+    if last_error is not None:
+        raise last_error
 
 
 def invalidate_cache(path: Path = DEFAULT_CACHE_PATH) -> None:
