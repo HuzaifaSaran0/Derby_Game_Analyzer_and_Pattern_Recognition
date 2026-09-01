@@ -62,7 +62,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "56"
+STATIC_VER = "57"
 
 
 def _is_public_path(path: str, method: str) -> bool:
@@ -248,7 +248,7 @@ def _alerts_payload(*, limit: int = 10) -> dict:
 def _notifications_payload(store: GameStore) -> dict:
     """Winner-hint alerts from the log (read/unread tracked client-side)."""
     settings = alert_settings_from_config(load_config())
-    recent = read_recent_alerts(settings.log_path, limit=50, winner_hint_only=True)
+    recent = read_recent_alerts(settings.log_path, limit=200, winner_hint_only=True)
     items = dedupe_winner_hint_items(
         [enrich_with_game_outcome(notification_item_from_alert(entry), store) for entry in recent]
     )
@@ -807,10 +807,6 @@ def create_app(
             store,
             in_progress=payload.get("in_progress", False),
         )
-        if payload.get("in_progress"):
-            from game_analyzer.live import _maybe_winner_hint_alerts
-
-            _maybe_winner_hint_alerts(load_config(), latest_id)
         return JSONResponse(payload, headers=NO_CACHE)
 
     @app.get("/api/winner-hints/search")

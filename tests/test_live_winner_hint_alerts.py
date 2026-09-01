@@ -70,21 +70,6 @@ def _record_winner(store: GameStore, game_id: str, winner: Suit, shot: Path, now
     )
 
 
-def _reset_hint_alert_state() -> None:
-    import game_analyzer.live as live
-
-    live._HINT_GAME_ID = None
-    live._HINT_ALERTED = set()
-    live._CONFIDENCE_LOGGED = set()
-
-
-@pytest.fixture(autouse=True)
-def _clean_hint_globals():
-    _reset_hint_alert_state()
-    yield
-    _reset_hint_alert_state()
-
-
 def test_notifiable_groups_when_multiple_lengths_agree():
     rows = [
         HintRow(length=4, tail=(3, 2, 4, 2), match_count=3, follow_up_counts={1: 0, 2: 0, 3: 3, 4: 0}),
@@ -185,56 +170,3 @@ def test_winner_hint_headline_multiple_patterns():
     ]
     assert winner_hint_headline(patterns) == "Diamonds (4) — 2 patterns"
     assert winner_hint_dedupe_key("13", patterns) == "13:next=4:4:4 2 3 2|5:2 4 2 3 2"
-
-
-def test_maybe_winner_hint_alerts_fires_once_per_game(tmp_path: Path):
-    import game_analyzer.live as live
-
-    store = GameStore(tmp_path / "games.sqlite", root=tmp_path)
-    live.GAME_STORE = store
-    shot = tmp_path / "001.png"
-    shot.write_bytes(PNG)
-    now = datetime(2026, 8, 18, 18, 0, 0)
-
-    pattern = [Suit.CLUBS, Suit.HEARTS, Suit.DIAMONDS, Suit.HEARTS]
-    for i in range(1, 15):
-        winner = pattern[(i - 1) % len(pattern)]
-        _record_winner(store, str(i), winner, shot, now)
-
-    log_path = tmp_path / "alerts.log"
-    config = {"alerts": {"log_path": str(log_path)}, "winner_hints": {"notify": True}}
-
-    with patch.object(live, "deliver_winner_hint_alert") as deliver:
-        live._maybe_winner_hint_alerts(config, "999")
-        live._maybe_winner_hint_alerts(config, "999")
-        assert deliver.call_count == 1
-        message = deliver.call_args.kwargs["alert_message"]
-        assert "Game 999" in message
-        assert "next winner likely" in message
-        assert deliver.call_args.kwargs.get("dedupe_key")
-
-
-def test_maybe_winner_hint_alerts_skips_when_log_has_entry(tmp_path: Path):
-    import game_analyzer.live as live
-
-    store = GameStore(tmp_path / "games.sqlite", root=tmp_path)
-    live.GAME_STORE = store
-    shot = tmp_path / "001.png"
-    shot.write_bytes(PNG)
-    now = datetime(2026, 8, 18, 18, 0, 0)
-
-    pattern = [Suit.CLUBS, Suit.HEARTS, Suit.DIAMONDS, Suit.HEARTS]
-    for i in range(1, 15):
-        winner = pattern[(i - 1) % len(pattern)]
-        _record_winner(store, str(i), winner, shot, now)
-
-    log_path = tmp_path / "alerts.log"
-    config = {"alerts": {"log_path": str(log_path)}, "winner_hints": {"notify": True}}
-
-    live._maybe_winner_hint_alerts(config, "999")
-    assert log_path.is_file()
-    _reset_hint_alert_state()
-
-    with patch.object(live, "deliver_winner_hint_alert") as deliver:
-        live._maybe_winner_hint_alerts(config, "999")
-        assert deliver.call_count == 0

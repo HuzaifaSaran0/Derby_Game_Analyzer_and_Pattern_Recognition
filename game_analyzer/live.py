@@ -18,7 +18,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from game_analyzer.alerts import alert_settings_from_config, deliver_winner_hint_alert, winner_hint_already_logged
+from game_analyzer.alerts import alert_settings_from_config
 from game_analyzer.capture import grab_frame, list_brave_tabs, list_monitors, read_page_game_id, read_page_timer
 from game_analyzer.config import load_config
 from game_analyzer.models import GamePhase
@@ -50,9 +50,6 @@ _SCHEDULE_ANCHOR_AT: float | None = None
 _TIMER_SAMPLED_AT: float | None = None
 _FRAME_GRABBED_AT: float | None = None
 # Live winner-hint alerts: dedupe per in-progress game / next-winner code.
-_HINT_GAME_ID: str | None = None
-_HINT_ALERTED: set[str] = set()
-_CONFIDENCE_LOGGED: set[str] = set()
 _RETAKE_PREVIEW_HOOK: Callable[[Path, object, str | None], None] | None = None
 _CAPTURE_MUTEX = threading.RLock()
 
@@ -94,100 +91,6 @@ def _resolve_confidence_outcome(config: dict, game_id: str, winner_suit: str) ->
 
     path = confidence_log_path_from_config(config)
     resolve_confidence_log_outcome(path, game_id, winner_suit)
-
-
-def _maybe_winner_hint_alerts(config: dict, game_id: str | None) -> None:
-    """Log live confidence and alert when tier is MEDIUM or HIGH."""
-    global _HINT_GAME_ID, _HINT_ALERTED, _CONFIDENCE_LOGGED
-    if not game_id:
-        return
-    hints_cfg = config.get("winner_hints") or {}
-    if hints_cfg.get("notify", True) is False and hints_cfg.get("confidence_log", True) is False:
-        return
-    if game_id != _HINT_GAME_ID:
-        _HINT_GAME_ID = game_id
-        _HINT_ALERTED = set()
-
-    from game_analyzer.winner_hints import (
-        analyze_tail,
-        append_confidence_log,
-        build_confidence_log_entry,
-        compute_live_confidence,
-        confidence_already_logged,
-        confidence_log_path_from_config,
-        finished_winner_codes,
-        format_winner_hint_alert_message,
-        format_winner_hint_push_message,
-        HINT_LENGTHS,
-        notifiable_winner_hint_groups,
-        NOTIFY_TIERS,
-        winner_hint_dedupe_key,
-    )
-
-    finished_codes = finished_winner_codes(GAME_STORE)
-    if len(finished_codes) < min(HINT_LENGTHS):
-        return
-    rows = []
-    for length in HINT_LENGTHS:
-        row = analyze_tail(finished_codes, length)
-        if row is not None:
-            rows.append(row)
-
-    confidence = compute_live_confidence(rows)
-    confidence_path = confidence_log_path_from_config(config)
-    log_confidence = hints_cfg.get("confidence_log", True) is not False
-    if (
-        log_confidence
-        and game_id not in _CONFIDENCE_LOGGED
-        and not confidence_already_logged(confidence_path, game_id)
-    ):
-        notified = confidence.tier in NOTIFY_TIERS and bool(confidence.supporting_patterns)
-        append_confidence_log(
-            confidence_path,
-            build_confidence_log_entry(
-                game_id=game_id,
-                confidence=confidence,
-                rows=rows,
-                notified=notified,
-            ),
-        )
-        _CONFIDENCE_LOGGED.add(game_id)
-
-    if hints_cfg.get("notify", True) is False:
-        return
-
-    groups = notifiable_winner_hint_groups(rows)
-    if not groups:
-        return
-
-    settings = alert_settings_from_config(config)
-    for next_code, patterns in groups.items():
-        dedupe = winner_hint_dedupe_key(game_id, patterns)
-        if dedupe in _HINT_ALERTED:
-            continue
-        if winner_hint_already_logged(settings.log_path, dedupe):
-            _HINT_ALERTED.add(dedupe)
-            continue
-        message = format_winner_hint_alert_message(
-            game_id,
-            patterns,
-            confidence_pct=confidence.confidence_pct,
-            tier=confidence.tier,
-        )
-        push_message = format_winner_hint_push_message(
-            game_id,
-            patterns,
-            confidence_pct=confidence.confidence_pct,
-            tier=confidence.tier,
-            public_base_url=settings.public_base_url,
-        )
-        if deliver_winner_hint_alert(
-            settings,
-            alert_message=message,
-            push_message=push_message,
-            dedupe_key=dedupe,
-        ):
-            _HINT_ALERTED.add(dedupe)
 
 
 def _retake_delay_seconds(capture: dict, phase: GamePhase) -> float | None:
@@ -323,8 +226,10 @@ def _persist_saved_frame(
         _SCHEDULE_ANCHOR_AT = _CAPTURE_STARTED_AT
     if decision.phase == GamePhase.FINISHED and result.winner_suit and decision.game_id:
         _resolve_confidence_outcome(config, decision.game_id, result.winner_suit)
-    if decision.phase != GamePhase.FINISHED and not result.winner_suit:
-        _maybe_winner_hint_alerts(config, decision.game_id)
+    if decision.should_save and decision.game_id and decision.phase != GamePhase.FINISHED:
+        from game_analyzer.winner_hints import evaluate_game_start_forecast
+
+        evaluate_game_start_forecast(GAME_STORE, config, decision.game_id)
     _schedule_lay_back_retake(config, decision, path)
     return path
 

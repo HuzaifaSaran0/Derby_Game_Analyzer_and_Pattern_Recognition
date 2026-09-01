@@ -685,6 +685,100 @@ def confidence_already_logged(path: Path, game_id: str) -> bool:
     return False
 
 
+def forecast_alert_already_sent(path: Path, game_id: str) -> bool:
+    """True when alerts.log already has a winner-hint row for this live game."""
+    if not game_id or not path.is_file():
+        return False
+    marker = f"[WINNER-HINT] Game {game_id}"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    return any(marker in line for line in lines[-400:])
+
+
+def evaluate_game_start_forecast(
+    store: GameStore,
+    config: dict[str, Any],
+    game_id: str,
+) -> LiveConfidence | None:
+    """Once per game (first saved shot): run lengths 4–10, log tier, notify if MEDIUM/HIGH.
+
+    Returns the computed confidence, or None when skipped (already evaluated / not enough history).
+    """
+    if not game_id:
+        return None
+
+    hints_cfg = config.get("winner_hints") or {}
+    if hints_cfg.get("notify", True) is False and hints_cfg.get("confidence_log", True) is False:
+        return None
+
+    confidence_path = confidence_log_path_from_config(config)
+    if confidence_already_logged(confidence_path, game_id):
+        return None
+
+    finished_codes = finished_winner_codes(store)
+    if len(finished_codes) < min(HINT_LENGTHS):
+        return None
+
+    rows: list[HintRow] = []
+    for length in HINT_LENGTHS:
+        row = analyze_tail(finished_codes, length)
+        if row is not None:
+            rows.append(row)
+
+    confidence = compute_live_confidence(rows)
+    log_confidence = hints_cfg.get("confidence_log", True) is not False
+    should_notify = (
+        hints_cfg.get("notify", True) is not False
+        and confidence.tier in NOTIFY_TIERS
+        and bool(confidence.supporting_patterns)
+    )
+
+    if log_confidence:
+        append_confidence_log(
+            confidence_path,
+            build_confidence_log_entry(
+                game_id=game_id,
+                confidence=confidence,
+                rows=rows,
+                notified=should_notify,
+            ),
+        )
+
+    if not should_notify:
+        return confidence
+
+    from game_analyzer.alerts import alert_settings_from_config, deliver_winner_hint_alert
+
+    settings = alert_settings_from_config(config)
+    if forecast_alert_already_sent(settings.log_path, game_id):
+        return confidence
+
+    patterns = list(confidence.supporting_patterns)
+    dedupe_key = f"game-start:{game_id}"
+    message = format_winner_hint_alert_message(
+        game_id,
+        patterns,
+        confidence_pct=confidence.confidence_pct,
+        tier=confidence.tier,
+    )
+    push_message = format_winner_hint_push_message(
+        game_id,
+        patterns,
+        confidence_pct=confidence.confidence_pct,
+        tier=confidence.tier,
+        public_base_url=settings.public_base_url,
+    )
+    deliver_winner_hint_alert(
+        settings,
+        alert_message=message,
+        push_message=push_message,
+        dedupe_key=dedupe_key,
+    )
+    return confidence
+
+
 def _read_confidence_log_lines(path: Path) -> list[str]:
     if not path.is_file():
         return []
