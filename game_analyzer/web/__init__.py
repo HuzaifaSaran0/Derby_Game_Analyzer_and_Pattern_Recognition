@@ -62,7 +62,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "55"
+STATIC_VER = "56"
 
 
 def _is_public_path(path: str, method: str) -> bool:
@@ -196,6 +196,21 @@ def _game_payload(store: GameStore, game_id: str, *, include_frames: bool = True
         "total": total,
         "in_progress": game.winner_suit is None,
     }
+
+
+def _unfinished_payload(store: GameStore) -> dict:
+    rows = store.list_unfinished_games(newest_first=True)
+    items = [
+        {
+            "game_id": row["game_id"],
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+            "shot_count": row["shot_count"],
+            "url": f"/game/{row['game_id']}",
+        }
+        for row in rows
+    ]
+    return {"total": len(items), "items": items}
 
 
 def _stats_payload(store: GameStore) -> dict:
@@ -652,6 +667,26 @@ def create_app(
         items = read_confidence_log(settings_path, limit=limit)
         enriched = [enrich_with_game_outcome(dict(entry), store) for entry in items]
         return JSONResponse({"items": enriched, "total": len(enriched)}, headers=NO_CACHE)
+
+    @app.get("/unfinished", response_class=HTMLResponse)
+    def unfinished_page(request: Request):
+        return templates.TemplateResponse(
+            request=request,
+            name="unfinished.html",
+            context=_ctx(request, active="data"),
+        )
+
+    @app.get("/api/unfinished")
+    def api_unfinished():
+        return JSONResponse(_unfinished_payload(store), headers=NO_CACHE)
+
+    @app.post("/api/unfinished/cleanup")
+    async def api_unfinished_cleanup():
+        deleted = store.delete_games_without_winner()
+        return JSONResponse(
+            {"deleted": deleted, "remaining": len(store.list_unfinished_games())},
+            headers=NO_CACHE,
+        )
 
     @app.get("/data", response_class=HTMLResponse)
     def data_page(request: Request):

@@ -32,7 +32,9 @@
     "dual_trigger_peek_seconds": 0.25,
     "result_window_seconds": 13,
     "result_poll_seconds": 0.5,
-    "finished_capture_settle_seconds": 0.5
+    "finished_capture_settle_seconds": 0.5,
+    "winner_poll_enabled": true,
+    "winner_poll_seconds": 1.2
   },
   "draw_overlays": false,
   "alerts": {

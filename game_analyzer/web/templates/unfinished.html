@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Unfinished games · Game Analyzer{% endblock %}
+{% block page %}unfinished{% endblock %}
+
+{% block content %}
+<section class="panel unfinished-page">
+  <h2 class="section-title">Games without winner</h2>
+  <p class="muted">
+    Internal list only — not shown in History. Ops Slack alerts fire when a new miss is detected.
+  </p>
+  <div class="unfinished-toolbar">
+    <button type="button" class="btn btn-sm" data-unfinished-refresh>Refresh</button>
+    <button type="button" class="btn btn-sm btn-secondary" data-unfinished-cleanup>
+      Delete all unfinished
+    </button>
+    <span class="muted" data-unfinished-summary>Loading…</span>
+  </div>
+  <div class="unfinished-table-wrap" data-unfinished-table>
+    <p class="muted">Loading…</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/unfinished.js?v={{ static_ver }}"></script>
+{% endblock %}

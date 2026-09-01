@@ -1085,11 +1085,35 @@ a { color: var(--accent); }
 .data-hint { margin: 10px 0 0; font-size: 0.88rem; }
 
 .data-note {
-  margin-top: 18px;
-  padding-top: 14px;
+  margin-top: 24px;
+  padding-top: 16px;
   border-top: 1px solid var(--border);
-  font-size: 0.88rem;
 }
+
+.unfinished-page { max-width: 900px; }
+
+.unfinished-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.unfinished-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.unfinished-table th,
+.unfinished-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.unfinished-table a { color: var(--accent); }
 
 .data-note p { margin: 0 0 8px; }
 

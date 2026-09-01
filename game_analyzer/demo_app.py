@@ -447,10 +447,11 @@ class DemoApp(ctk.CTk):
         if self.looping:
             return
         from game_analyzer.capture_health import mark_capture_started, setup_capture_logging
-        from game_analyzer.live import set_retake_preview_hook
+        from game_analyzer.live import set_retake_preview_hook, start_winner_poll
 
         setup_capture_logging(self.config_data)
         mark_capture_started(source="demo_app", config=self.config_data)
+        start_winner_poll(self.config_data)
         set_retake_preview_hook(self._on_retake_preview)
         self._show_live_workspace()
         region = self.config_data["capture"]
@@ -474,7 +475,9 @@ class DemoApp(ctk.CTk):
 
     def stop_loop(self) -> None:
         from game_analyzer.capture_health import mark_capture_stopped
-        from game_analyzer.live import set_retake_preview_hook
+        from game_analyzer.live import set_retake_preview_hook, stop_winner_poll
+
+        stop_winner_poll()
 
         mark_capture_stopped(reason="user stopped", config=self.config_data)
         set_retake_preview_hook(None)

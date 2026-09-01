@@ -15,14 +15,19 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_LOG = ROOT / "data" / "alerts.log"
 
 
+ROOT_OPS_LOG = ROOT / "data" / "ops_alerts.log"
+
+
 @dataclass(frozen=True)
 class AlertSettings:
     webhook_url: str = ""
+    ops_webhook_url: str = ""
     discord_webhook_url: str = ""
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     public_base_url: str = ""
     log_path: Path = DEFAULT_LOG
+    ops_log_path: Path = ROOT_OPS_LOG
 
 
 def alert_settings_from_config(config: dict[str, Any]) -> AlertSettings:
@@ -36,13 +41,17 @@ def alert_settings_from_config(config: dict[str, Any]) -> AlertSettings:
     tg_token = str(tg.get("bot_token") or raw.get("telegram_bot_token") or "").strip()
     tg_chat = str(tg.get("chat_id") or raw.get("telegram_chat_id") or "").strip()
     public_base = str(raw.get("public_base_url") or "").strip()
+    ops_webhook = str(raw.get("ops_webhook_url") or "").strip()
+    ops_log_path = raw.get("ops_log_path")
     return AlertSettings(
         webhook_url=webhook,
+        ops_webhook_url=ops_webhook,
         discord_webhook_url=discord,
         telegram_bot_token=tg_token,
         telegram_chat_id=tg_chat,
         public_base_url=public_base,
         log_path=Path(log_path) if log_path else DEFAULT_LOG,
+        ops_log_path=Path(ops_log_path) if ops_log_path else ROOT_OPS_LOG,
     )
 
 
@@ -241,6 +250,41 @@ def deliver_similarity_alert(
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             append_alert_log(settings.log_path, f"WEBHOOK FAILED: {error} — {alert_message}")
     print(f"*** ALERT ({alert_kind}) *** {alert_message}")
+
+
+def deliver_ops_alert(
+    settings: AlertSettings,
+    message: str,
+    *,
+    dedupe_key: str = "",
+) -> bool:
+    """Internal ops alert — ops Slack/DM only, never client webhook or UI bell."""
+    if not message.strip():
+        return False
+    if dedupe_key and ops_alert_already_logged(settings.ops_log_path, dedupe_key):
+        return False
+    append_alert_log(settings.ops_log_path, message)
+    if settings.ops_webhook_url:
+        try:
+            post_webhook(settings.ops_webhook_url, message)
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            append_alert_log(
+                settings.ops_log_path,
+                f"WEBHOOK FAILED: {error} — {message}",
+            )
+    print(f"*** OPS ALERT *** {message}")
+    return True
+
+
+def ops_alert_already_logged(path: Path, dedupe_key: str) -> bool:
+    if not dedupe_key or not path.is_file():
+        return False
+    needle = f"game_id={dedupe_key}"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    return any(needle in line for line in lines[-200:])
 
 
 def deliver_winner_hint_alert(

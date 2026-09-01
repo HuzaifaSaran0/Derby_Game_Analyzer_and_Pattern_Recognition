@@ -4,7 +4,7 @@ Hybrid schedule (brave_cdp):
   - first shot of a game: read on-page timer, sleep that many seconds
   - after handicap: sleep ~37s to first draw
   - mid draws: sleep ~32s
-  - after each IN_PLAY: poll ~13s for WINNER
+  - background winner poll every ~1.2s while a game is open (one FINISHED save)
   - same-cards: short retries
 """
 
@@ -54,6 +54,7 @@ _HINT_GAME_ID: str | None = None
 _HINT_ALERTED: set[str] = set()
 _CONFIDENCE_LOGGED: set[str] = set()
 _RETAKE_PREVIEW_HOOK: Callable[[Path, object, str | None], None] | None = None
+_CAPTURE_MUTEX = threading.RLock()
 
 
 def set_retake_preview_hook(
@@ -264,6 +265,199 @@ def _schedule_lay_back_retake(config: dict, decision: SessionDecision, path: Pat
     timer.start()
 
 
+def _winner_poll_enabled(config: dict) -> bool:
+    return bool((config.get("capture") or {}).get("winner_poll_enabled", True))
+
+
+def _winner_poll_seconds(config: dict) -> float:
+    return float((config.get("capture") or {}).get("winner_poll_seconds", 1.2))
+
+
+def _game_already_has_winner(game_id: str) -> bool:
+    game = GAME_STORE.get_game(game_id)
+    return game is not None and bool(game.winner_suit)
+
+
+def _winner_poll_target_game_id() -> str | None:
+    """Open in-progress session with no winner saved yet."""
+    tracker = SESSION_TRACKER
+    game_id = tracker.session_game_id
+    if not tracker.session_id or not game_id:
+        return None
+    if tracker._close_after_save:
+        return None
+    if _game_already_has_winner(game_id):
+        return None
+    return game_id
+
+
+def _persist_saved_frame(
+    config: dict,
+    decision: SessionDecision,
+    result,
+    frame,
+    captured_at: datetime,
+    *,
+    raw_path: Path | None = None,
+) -> Path:
+    """Write PNG + DB row for a decision that already has should_save=True."""
+    global _SCHEDULE_ANCHOR_AT
+    capture = config["capture"]
+    folder = LIVE_DIR / decision.folder_name()
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = decision.file_stem(captured_at)
+    path = raw_path or (folder / f"{stem}.png")
+    save_frame = frame
+    if decision.phase == GamePhase.FINISHED:
+        settle = float(capture.get("finished_capture_settle_seconds", 0.5))
+        if settle > 0:
+            time.sleep(settle)
+            save_frame = grab_frame(config)
+    write_image(path, save_frame)
+    if config.get("draw_overlays", False):
+        overlay_path = folder / f"{stem}_boxes.png"
+        overlay = draw_table_overlay(frame[:, :, ::-1], config, result)
+        write_image(overlay_path, overlay[:, :, ::-1])
+    GAME_STORE.record(decision, result, path, captured_at)
+    if _CAPTURE_STARTED_AT is not None:
+        _SCHEDULE_ANCHOR_AT = _CAPTURE_STARTED_AT
+    if decision.phase == GamePhase.FINISHED and result.winner_suit and decision.game_id:
+        _resolve_confidence_outcome(config, decision.game_id, result.winner_suit)
+    if decision.phase != GamePhase.FINISHED and not result.winner_suit:
+        _maybe_winner_hint_alerts(config, decision.game_id)
+    _schedule_lay_back_retake(config, decision, path)
+    return path
+
+
+def _try_capture_winner(config: dict) -> bool:
+    """Background poll: grab once, save FINISHED exactly once for the open game."""
+    global _LAST_DECISION, _LAST_FRAME, _LAST_PATH, _LAST_RESULT
+    if not _winner_poll_enabled(config):
+        return False
+
+    target_game_id = _winner_poll_target_game_id()
+    if not target_game_id:
+        return False
+
+    capture = config["capture"]
+    page_game_id = read_page_game_id(capture)
+    if not page_game_id or page_game_id != target_game_id:
+        return False
+
+    try:
+        frame = grab_frame(config)
+        result = extract_real(frame, config)
+    except Exception as exc:
+        from game_analyzer.capture_health import record_capture_error
+
+        record_capture_error(exc, context="winner poll grab failed", config=config)
+        return False
+
+    if result.game_phase() != GamePhase.FINISHED or not result.winner_suit:
+        return False
+
+    with _CAPTURE_MUTEX:
+        target_game_id = _winner_poll_target_game_id()
+        if not target_game_id:
+            return False
+        page_game_id = read_page_game_id(capture)
+        if page_game_id != target_game_id:
+            return False
+        if _game_already_has_winner(target_game_id):
+            return False
+
+        captured_at = datetime.now()
+        previous_game_id = SESSION_TRACKER.session_game_id
+        SESSION_TRACKER.timing = _timing_from_config(config)
+        decision = SESSION_TRACKER.observe(
+            result,
+            captured_at,
+            game_id=page_game_id,
+            timer_seconds=None,
+        )
+        _maybe_notify_missed_winner(config, previous_game_id, page_game_id)
+        if not decision.should_save or decision.phase != GamePhase.FINISHED:
+            return False
+        if decision.game_id and _game_already_has_winner(decision.game_id):
+            return False
+
+        raw_path = _persist_saved_frame(config, decision, result, frame, captured_at)
+        _LAST_DECISION = decision
+        _LAST_FRAME = frame
+        _LAST_PATH = raw_path
+        _LAST_RESULT = result
+        from game_analyzer.capture_health import record_capture_tick
+
+        record_capture_tick(
+            game_id=decision.game_id,
+            phase=decision.phase.value if decision.phase else None,
+            recording=bool(decision.recording),
+            in_progress=False,
+            saved=True,
+            notes="winner poll",
+            config=config,
+        )
+        return True
+
+
+class WinnerPollWatcher:
+    """Poll for FINISHED while a game is open; never blocks the main capture schedule."""
+
+    def __init__(self) -> None:
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._config: dict | None = None
+
+    def start(self, config: dict) -> None:
+        self.stop()
+        if not _winner_poll_enabled(config):
+            return
+        self._config = config
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, name="winner-poll", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread = self._thread
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=3.0)
+        self._thread = None
+        self._config = None
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            config = self._config
+            if config is not None:
+                try:
+                    _try_capture_winner(config)
+                except Exception as exc:
+                    from game_analyzer.capture_health import record_capture_error
+
+                    record_capture_error(exc, context="winner poll tick failed", config=config)
+            if self._stop.wait(_winner_poll_seconds(config or {})):
+                break
+
+
+_WINNER_POLL_WATCHER = WinnerPollWatcher()
+
+
+def start_winner_poll(config: dict | None = None) -> None:
+    _WINNER_POLL_WATCHER.start(config or load_config())
+
+
+def stop_winner_poll() -> None:
+    _WINNER_POLL_WATCHER.stop()
+
+
+def _maybe_notify_missed_winner(config: dict, previous_game_id: str | None, page_game_id: str | None) -> None:
+    if not previous_game_id or not page_game_id or page_game_id == previous_game_id:
+        return
+    from game_analyzer.ops_alerts import notify_missed_winner
+
+    notify_missed_winner(config, GAME_STORE, previous_game_id)
+
+
 def capture_once(config: dict | None = None):
     """Grab via screen box or Brave CDP, save PNG + overlay, return paths/result."""
     global _LAST_DECISION, _LAST_FRAME, _LAST_PATH, _LAST_RESULT
@@ -315,42 +509,51 @@ def _capture_once_impl(config: dict):
     _FRAME_GRABBED_AT = time.monotonic()
     result = extract_real(frame, config)
     captured_at = datetime.now()
-    decision = SESSION_TRACKER.observe(
-        result,
-        captured_at,
-        game_id=game_id,
-        timer_seconds=timer_seconds,
-    )
-    folder = LIVE_DIR / decision.folder_name()
-    folder.mkdir(parents=True, exist_ok=True)
-    stem = decision.file_stem(captured_at)
-    raw_path = folder / f"{stem}.png"
-    if decision.should_save:
-        save_frame = frame
-        if decision.phase == GamePhase.FINISHED:
-            settle = float(capture.get("finished_capture_settle_seconds", 0.5))
-            if settle > 0:
-                time.sleep(settle)
-                save_frame = grab_frame(config)
-        write_image(raw_path, save_frame)
-        if config.get("draw_overlays", False):
-            overlay_path = folder / f"{stem}_boxes.png"
-            overlay = draw_table_overlay(frame[:, :, ::-1], config, result)
-            write_image(overlay_path, overlay[:, :, ::-1])
-        GAME_STORE.record(decision, result, raw_path, captured_at)
-        # Anchor fixed 32/37 schedule waits to saved shots (not result-window peeks).
-        _SCHEDULE_ANCHOR_AT = _CAPTURE_STARTED_AT
-        if decision.phase == GamePhase.FINISHED and result.winner_suit and decision.game_id:
-            _resolve_confidence_outcome(config, decision.game_id, result.winner_suit)
-        if decision.phase != GamePhase.FINISHED and not result.winner_suit:
-            _maybe_winner_hint_alerts(config, decision.game_id)
-        # ~9s later the back/lay table is on screen: swap the PNG in place (analysis
-        # above already ran on this frame; timing of the next shot is unaffected).
-        _schedule_lay_back_retake(config, decision, raw_path)
-    _LAST_DECISION = decision
-    _LAST_FRAME = frame
-    _LAST_PATH = raw_path
-    _LAST_RESULT = result
+    previous_game_id = SESSION_TRACKER.session_game_id
+
+    with _CAPTURE_MUTEX:
+        decision = SESSION_TRACKER.observe(
+            result,
+            captured_at,
+            game_id=game_id,
+            timer_seconds=timer_seconds,
+        )
+        _maybe_notify_missed_winner(config, previous_game_id, game_id)
+        folder = LIVE_DIR / decision.folder_name()
+        folder.mkdir(parents=True, exist_ok=True)
+        stem = decision.file_stem(captured_at)
+        raw_path = folder / f"{stem}.png"
+        if decision.should_save:
+            if (
+                decision.phase == GamePhase.FINISHED
+                and decision.game_id
+                and _game_already_has_winner(decision.game_id)
+            ):
+                decision = SessionDecision(
+                    recording=decision.recording,
+                    session_id=decision.session_id,
+                    seq=decision.seq,
+                    phase=decision.phase,
+                    reason="winner already saved — skip duplicate",
+                    should_save=False,
+                    next_wait_seconds=decision.next_wait_seconds,
+                    wait_mode=decision.wait_mode,
+                    watch_result=decision.watch_result,
+                    game_id=decision.game_id,
+                    peek_id_only=decision.peek_id_only,
+                    wait_from_live_timer=decision.wait_from_live_timer,
+                    table_cards=decision.table_cards,
+                    drawn_cards=decision.drawn_cards,
+                )
+            else:
+                raw_path = _persist_saved_frame(
+                    config, decision, result, frame, captured_at, raw_path=raw_path
+                )
+        _LAST_DECISION = decision
+        _LAST_FRAME = frame
+        _LAST_PATH = raw_path
+        _LAST_RESULT = result
+
     from game_analyzer.capture_health import record_capture_tick
 
     record_capture_tick(
@@ -452,6 +655,7 @@ def loop_forever(delay: float | None = None, interval: float | None = None) -> N
     from game_analyzer.capture_health import mark_capture_started, mark_capture_stopped, record_capture_error
 
     mark_capture_started(source="live_loop", config=config)
+    start_winner_poll(config)
     capture = config["capture"]
     wait = float(delay if delay is not None else capture.get("delay_seconds", 5))
     if timer_sync_enabled(capture):
@@ -497,6 +701,7 @@ def loop_forever(delay: float | None = None, interval: float | None = None) -> N
                 record_capture_error(exc, context="live loop tick failed", config=config)
                 time.sleep(float(capture.get("error_retry_seconds", 5)))
     finally:
+        stop_winner_poll()
         mark_capture_stopped(reason="loop exited", config=config)
 
 

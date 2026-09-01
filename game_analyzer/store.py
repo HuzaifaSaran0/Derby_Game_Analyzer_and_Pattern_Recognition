@@ -321,6 +321,20 @@ class GameStore:
                 ).fetchall()
         return [r["game_id"] for r in rows]
 
+    def list_unfinished_games(self, *, newest_first: bool = True) -> list[dict]:
+        order = "DESC" if newest_first else "ASC"
+        with self._connect(autocommit=True) as con:
+            rows = con.execute(
+                f"""
+                SELECT game_id, started_at, finished_at, winner_suit,
+                       (SELECT COUNT(*) FROM frames f WHERE f.game_id = games.game_id) AS shot_count
+                FROM games
+                WHERE winner_suit IS NULL
+                ORDER BY id {order}
+                """
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def delete_games_without_winner(self) -> int:
         """Remove unfinished/abandoned games (no winner_suit)."""
         deleted = 0
