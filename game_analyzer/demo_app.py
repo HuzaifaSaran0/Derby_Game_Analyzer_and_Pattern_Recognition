@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import customtkinter as ctk
@@ -49,6 +50,7 @@ class DemoApp(ctk.CTk):
 
         self.looping = False
         self.after_id = None
+        self._capture_busy = False
         self.last_session_text = "offline screenshot"
         self.last_table_cards = None
         self._result_value_labels: list[ctk.CTkLabel] = []
@@ -492,18 +494,38 @@ class DemoApp(ctk.CTk):
             self.file_label.configure(text="Capture stopped — press Start capture to resume")
 
     def _loop_tick(self) -> None:
-        if not self.looping:
+        if not self.looping or self._capture_busy:
             return
+        self._capture_busy = True
+        self.file_label.configure(text="Capturing…")
+        threading.Thread(target=self._capture_worker, daemon=True, name="demo-capture").start()
+
+    def _capture_worker(self) -> None:
         from game_analyzer.capture_health import record_capture_error
         from game_analyzer.live import capture_once
 
         try:
-            path, frame, _result, decision = capture_once(self.config_data)
+            path, frame, result, decision = capture_once(self.config_data)
+            error = None
         except Exception as exc:
             record_capture_error(exc, context="demo_app capture tick failed", config=self.config_data)
-            self.status.configure(text=f"Capture error: {exc}")
-            if self.looping:
+            path, frame, result, decision = None, None, None, None
+            error = exc
+
+        def _finish() -> None:
+            self._capture_busy = False
+            if not self.looping:
+                return
+            if error is not None:
+                self.status.configure(text=f"Capture error: {error}")
                 self.after_id = self.after(5000, self._loop_tick)
+                return
+            self._apply_capture_result(path, frame, result, decision)
+
+        self.after(0, _finish)
+
+    def _apply_capture_result(self, path, frame, result, decision) -> None:
+        if not self.looping:
             return
         gid = decision.game_id or decision.session_id
         if decision.recording:
@@ -520,6 +542,7 @@ class DemoApp(ctk.CTk):
                 rel,
                 table_cards=decision.table_cards,
                 drawn_cards=decision.drawn_cards,
+                result=result,
             )
         else:
             self.result_session.configure(text=self.last_session_text)
@@ -547,9 +570,11 @@ class DemoApp(ctk.CTk):
         label: str,
         table_cards=None,
         drawn_cards: tuple[str, ...] = (),
+        result: ExtractionResult | None = None,
     ) -> None:
         self._show_live_workspace()
-        result = extract_real(frame, self.config_data)
+        if result is None:
+            result = extract_real(frame, self.config_data)
         if not drawn_cards and result.draw_cards:
             drawn_cards = tuple(result.draw_cards)
         rgb = frame[:, :, ::-1]

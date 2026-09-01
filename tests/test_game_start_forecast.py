@@ -108,3 +108,30 @@ def test_forecast_alert_already_sent(tmp_path: Path):
     )
     assert forecast_alert_already_sent(log_path, "555") is True
     assert forecast_alert_already_sent(log_path, "556") is False
+
+
+def test_reconcile_forecasts_with_alerts_patches_stale_log(tmp_path: Path):
+    from game_analyzer.winner_hints import reconcile_forecasts_with_alerts
+
+    alerts_path = tmp_path / "alerts.log"
+    alerts_path.write_text(
+        "2026-09-02T01:55:00+00:00  [WINNER-HINT] Game 105438221 — next winner likely 4 — "
+        "history 67% (MEDIUM) — Last 4 (3 2 4 2) 3 cases → 4 (2/3, 67%) · link=/forecasts?game=105438221\n",
+        encoding="utf-8",
+    )
+    stale = [
+        {
+            "at": "2026-09-02T01:54:00+00:00",
+            "game_id": "105438221",
+            "pick": None,
+            "tier": "NONE",
+            "notified": False,
+        }
+    ]
+    merged = reconcile_forecasts_with_alerts(stale, alerts_path)
+    assert len(merged) == 1
+    row = merged[0]
+    assert row["game_id"] == "105438221"
+    assert row["pick"] == 4
+    assert row["tier"] == "MEDIUM"
+    assert row["notified"] is True

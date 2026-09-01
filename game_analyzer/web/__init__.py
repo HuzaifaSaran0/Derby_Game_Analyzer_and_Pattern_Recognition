@@ -35,6 +35,7 @@ from game_analyzer.winner_hints import (
     notification_item_from_alert,
     parse_pattern_codes,
     read_confidence_log,
+    reconcile_forecasts_with_alerts,
     search_winner_pattern,
     SUIT_META,
 )
@@ -663,8 +664,11 @@ def create_app(
 
     @app.get("/api/winner-confidence")
     def api_winner_confidence(limit: int = Query(200, ge=1, le=500)):
-        settings_path = confidence_log_path_from_config(load_config())
+        config = load_config()
+        settings = alert_settings_from_config(config)
+        settings_path = confidence_log_path_from_config(config)
         items = read_confidence_log(settings_path, limit=limit)
+        items = reconcile_forecasts_with_alerts(items, settings.log_path, limit=limit)
         enriched = [enrich_with_game_outcome(dict(entry), store) for entry in items]
         return JSONResponse({"items": enriched, "total": len(enriched)}, headers=NO_CACHE)
 

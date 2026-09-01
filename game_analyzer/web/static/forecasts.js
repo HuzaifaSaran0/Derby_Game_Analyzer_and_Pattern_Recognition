@@ -212,7 +212,9 @@
 
   function isDisplayable(item) {
     const tier = String(item.tier || "NONE").toUpperCase();
-    if (!DISPLAY_TIERS[tier] || !item.pick) return false;
+    const pick = item.pick != null && item.pick !== "";
+    if (item.notified && pick) return true;
+    if (!DISPLAY_TIERS[tier] || !pick) return false;
     if (hasOutcome(item)) return true;
     return isRecentForecast(item);
   }

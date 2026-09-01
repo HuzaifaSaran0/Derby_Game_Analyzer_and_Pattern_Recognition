@@ -148,11 +148,8 @@ def search_pattern(finished_codes: list[int], pattern: tuple[int, ...]) -> HintR
 
 def finished_winner_codes(store: GameStore) -> list[int]:
     finished_codes: list[int] = []
-    for game_id in store.list_game_ids(finished_only=True):
-        game = store.get_game(game_id)
-        if game is None or not game.winner_suit:
-            continue
-        code = winner_code(game.winner_suit)
+    for suit in store.list_finished_winner_suits():
+        code = winner_code(suit)
         if code is not None:
             finished_codes.append(code)
     return finished_codes
@@ -653,6 +650,86 @@ def append_confidence_log(path: Path, entry: dict[str, Any]) -> None:
         handle.write(json.dumps(entry, separators=(",", ":")) + "\n")
 
 
+def upsert_confidence_log_entry(path: Path, entry: dict[str, Any]) -> None:
+    """Replace the row for game_id, or append when new."""
+    game_id = str(entry.get("game_id") or "")
+    if not game_id:
+        append_confidence_log(path, entry)
+        return
+    lines = _read_confidence_log_lines(path)
+    replaced = False
+    new_lines: list[str] = []
+    for line in lines:
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            existing = json.loads(text)
+        except json.JSONDecodeError:
+            new_lines.append(line)
+            continue
+        if str(existing.get("game_id") or "") == game_id:
+            new_lines.append(json.dumps(entry, separators=(",", ":")))
+            replaced = True
+        else:
+            new_lines.append(line)
+    if not replaced:
+        new_lines.append(json.dumps(entry, separators=(",", ":")))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(new_lines) + ("\n" if new_lines else ""), encoding="utf-8")
+
+
+def reconcile_forecasts_with_alerts(
+    items: list[dict[str, Any]],
+    alerts_path: Path,
+    *,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    """Ensure games that received a winner-hint alert appear on the Forecasts page."""
+    from game_analyzer.alerts import read_recent_alerts
+
+    by_game: dict[str, dict[str, Any]] = {
+        str(item.get("game_id") or ""): dict(item)
+        for item in items
+        if item.get("game_id")
+    }
+    for alert in read_recent_alerts(alerts_path, limit=limit, winner_hint_only=True):
+        notif = notification_item_from_alert(alert)
+        game_id = str(notif.get("game_id") or "")
+        tier = str(notif.get("tier") or "").upper()
+        pick_raw = notif.get("next_winner") or notif.get("pick")
+        if not game_id or tier not in NOTIFY_TIERS or pick_raw in (None, ""):
+            continue
+        pick = int(pick_raw)
+        existing = by_game.get(game_id)
+        needs_patch = (
+            existing is None
+            or str(existing.get("tier") or "").upper() not in NOTIFY_TIERS
+            or not existing.get("pick")
+            or not existing.get("notified")
+        )
+        if not needs_patch:
+            continue
+        patched = dict(existing or {})
+        patched.update(
+            {
+                "at": patched.get("at") or alert.get("at") or "",
+                "game_id": game_id,
+                "pick": pick,
+                "pick_label": CODE_TO_SUIT.get(pick, ""),
+                "confidence_pct": int(notif.get("confidence_pct") or patched.get("confidence_pct") or 0),
+                "tier": tier,
+                "notified": True,
+                "patterns": list(notif.get("patterns") or patched.get("patterns") or []),
+            }
+        )
+        by_game[game_id] = patched
+
+    merged = list(by_game.values())
+    merged.sort(key=lambda row: str(row.get("at") or ""), reverse=True)
+    return merged[:limit] if limit > 0 else merged
+
+
 def read_confidence_log(path: Path, *, limit: int = 200) -> list[dict[str, Any]]:
     if limit <= 0 or not path.is_file():
         return []
@@ -736,7 +813,7 @@ def evaluate_game_start_forecast(
     )
 
     if log_confidence:
-        append_confidence_log(
+        upsert_confidence_log_entry(
             confidence_path,
             build_confidence_log_entry(
                 game_id=game_id,

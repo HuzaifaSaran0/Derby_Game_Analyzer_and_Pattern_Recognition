@@ -321,6 +321,14 @@ class GameStore:
                 ).fetchall()
         return [r["game_id"] for r in rows]
 
+    def list_finished_winner_suits(self) -> list[str]:
+        """Winner suits in game order — one query (for forecast history tails)."""
+        with self._connect(autocommit=True) as con:
+            rows = con.execute(
+                "SELECT winner_suit FROM games WHERE winner_suit IS NOT NULL ORDER BY id ASC"
+            ).fetchall()
+        return [str(r["winner_suit"]) for r in rows if r["winner_suit"]]
+
     def list_unfinished_games(self, *, newest_first: bool = True) -> list[dict]:
         order = "DESC" if newest_first else "ASC"
         with self._connect(autocommit=True) as con:
