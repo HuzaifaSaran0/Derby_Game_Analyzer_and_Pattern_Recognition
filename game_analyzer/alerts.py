@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import ssl
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -177,6 +178,16 @@ def latest_alert(path: Path, *, winner_hint_only: bool = False) -> dict[str, str
     return rows[0] if rows else None
 
 
+def _webhook_ssl_context() -> ssl.SSLContext:
+    """Use certifi CA bundle — Windows VPS Python often lacks system CAs for HTTPS."""
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
 def _post_json(url: str, payload: dict[str, Any]) -> None:
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
@@ -185,7 +196,7 @@ def _post_json(url: str, payload: dict[str, Any]) -> None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with urllib.request.urlopen(request, timeout=10, context=_webhook_ssl_context()) as response:
         response.read()
 
 
