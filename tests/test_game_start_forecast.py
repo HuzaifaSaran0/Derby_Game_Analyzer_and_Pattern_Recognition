@@ -44,8 +44,16 @@ def _record_winner(store: GameStore, game_id: str, winner: Suit, shot: Path, now
 
 
 def _seed_history(store: GameStore, shot: Path, now: datetime) -> None:
-    pattern = [Suit.CLUBS, Suit.HEARTS, Suit.DIAMONDS, Suit.HEARTS]
-    for i in range(1, 15):
+    # Repeating 6-suit block so lengths 6–10 find clear historical matches.
+    pattern = [
+        Suit.CLUBS,
+        Suit.HEARTS,
+        Suit.DIAMONDS,
+        Suit.HEARTS,
+        Suit.SPADES,
+        Suit.HEARTS,
+    ]
+    for i in range(1, 25):
         winner = pattern[(i - 1) % len(pattern)]
         _record_winner(store, str(i), winner, shot, now)
 
@@ -55,7 +63,13 @@ def test_evaluate_game_start_forecast_notifies_once(tmp_path: Path):
     shot = tmp_path / "001.png"
     shot.write_bytes(PNG)
     now = datetime(2026, 8, 18, 18, 0, 0)
-    _seed_history(store, shot, now)
+    # Clear streak history: many 3× Clubs → Diamonds, live ends on 3× Clubs.
+    codes = []
+    for _ in range(6):
+        codes.extend([Suit.CLUBS, Suit.CLUBS, Suit.CLUBS, Suit.DIAMONDS])
+    codes.extend([Suit.CLUBS, Suit.CLUBS, Suit.CLUBS])
+    for i, winner in enumerate(codes, start=1):
+        _record_winner(store, str(i), winner, shot, now)
 
     log_path = tmp_path / "alerts.log"
     conf_path = tmp_path / "confidence.log"
@@ -71,8 +85,40 @@ def test_evaluate_game_start_forecast_notifies_once(tmp_path: Path):
         assert first.tier in NOTIFY_TIERS
         assert second is None
         assert deliver.call_count == 1
+        assert deliver.call_args.kwargs["dedupe_key"] == "game-start-streak:999"
+        assert "streak" in deliver.call_args.kwargs["alert_message"]
         assert "Game 999" in deliver.call_args.kwargs["alert_message"]
-        assert deliver.call_args.kwargs["dedupe_key"] == "game-start:999"
+
+
+def test_evaluate_game_start_forecast_no_slack_for_sequence_only(tmp_path: Path):
+    """Sequence MEDIUM/HIGH must not Slack — only same-winner streaks notify."""
+    store = GameStore(tmp_path / "games.sqlite", root=tmp_path)
+    shot = tmp_path / "001.png"
+    shot.write_bytes(PNG)
+    now = datetime(2026, 8, 18, 18, 0, 0)
+    _seed_history(store, shot, now)
+
+    log_path = tmp_path / "alerts.log"
+    conf_path = tmp_path / "confidence.log"
+    config = {
+        "alerts": {"log_path": str(log_path), "webhook_url": "https://hooks.slack.com/test"},
+        "winner_hints": {"notify": True, "confidence_log_path": str(conf_path)},
+    }
+
+    with patch("game_analyzer.alerts.deliver_winner_hint_alert") as deliver:
+        result = evaluate_game_start_forecast(store, config, "888")
+        assert result is not None
+        # Trailing Hearts streak length 1 in _seed_history → no streak alert.
+        streak_calls = [
+            c for c in deliver.call_args_list if "streak" in str(c.kwargs.get("dedupe_key", ""))
+        ]
+        sequence_calls = [
+            c for c in deliver.call_args_list if c.kwargs.get("dedupe_key") == "game-start:888"
+        ]
+        assert sequence_calls == []
+        # No trailing same-winner streak of ≥2 in this seed → no Slack.
+        assert streak_calls == []
+        deliver.assert_not_called()
 
 
 def test_evaluate_game_start_forecast_skips_low_tier(tmp_path: Path):
@@ -103,11 +149,14 @@ def test_evaluate_game_start_forecast_skips_low_tier(tmp_path: Path):
 def test_forecast_alert_already_sent(tmp_path: Path):
     log_path = tmp_path / "alerts.log"
     log_path.write_text(
-        "2026-09-01T00:00:00+00:00  [WINNER-HINT] Game 555 — next winner likely 2 — history 70% (MEDIUM)\n",
+        "2026-09-01T00:00:00+00:00  [WINNER-HINT] Game 555 — next winner likely 2 — history 70% (MEDIUM)\n"
+        "2026-09-01T00:01:00+00:00  [WINNER-HINT] Game 555 — streak 3×4 — next winner likely 1 — history 80% (HIGH)\n",
         encoding="utf-8",
     )
     assert forecast_alert_already_sent(log_path, "555") is True
+    assert forecast_alert_already_sent(log_path, "555", streak=True) is True
     assert forecast_alert_already_sent(log_path, "556") is False
+    assert forecast_alert_already_sent(log_path, "556", streak=True) is False
 
 
 def test_reconcile_forecasts_with_alerts_patches_stale_log(tmp_path: Path):

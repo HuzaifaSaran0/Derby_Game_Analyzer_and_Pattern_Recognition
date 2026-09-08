@@ -4,6 +4,7 @@
 
   const statusEl = document.querySelector("[data-confidence-status]");
   const listEl = document.querySelector("[data-confidence-list]");
+  const accuracyEl = document.querySelector("[data-streak-accuracy]");
   const DISPLAY_TIERS = { MEDIUM: true, HIGH: true };
 
   function readMeta() {
@@ -184,7 +185,7 @@
       .join("");
     return (
       '<details class="confidence-details">' +
-      "<summary>All history lengths checked (4–10 past winners)</summary>" +
+      "<summary>All history lengths checked (6–10 past winners)</summary>" +
       lines +
       "</details>"
     );
@@ -213,8 +214,13 @@
   function isDisplayable(item) {
     const tier = String(item.tier || "NONE").toUpperCase();
     const pick = item.pick != null && item.pick !== "";
-    if (item.notified && pick) return true;
-    if (!DISPLAY_TIERS[tier] || !pick) return false;
+    const streak = item.streak || null;
+    const streakTier = String((streak && streak.tier) || "NONE").toUpperCase();
+    const streakPick = streak && streak.pick != null && streak.pick !== "";
+    if (item.notified && (pick || streakPick)) return true;
+    if (DISPLAY_TIERS[tier] && pick) return true;
+    if (DISPLAY_TIERS[streakTier] && streakPick) return true;
+    if (!pick && !streakPick) return false;
     if (hasOutcome(item)) return true;
     return isRecentForecast(item);
   }
@@ -275,6 +281,75 @@
     return "Result: " + actual + " won";
   }
 
+  function renderStreak(streak) {
+    if (!streak || !streak.length) {
+      return "";
+    }
+    const suitCode = streak.suit_code != null ? String(streak.suit_code) : "";
+    const tier = String(streak.tier || "NONE").toUpperCase();
+    const pick = streak.pick != null && streak.pick !== "" ? String(streak.pick) : "";
+    if (!DISPLAY_TIERS[tier] && !streak.notified && !pick) {
+      return (
+        '<div class="confidence-patterns-block">' +
+        '<p class="confidence-meta muted">Streak check: ' +
+        escapeHtml(String(streak.length)) +
+        "× " +
+        escapeHtml(suitCode || "?") +
+        " — no strong next-winner signal</p></div>"
+      );
+    }
+    return (
+      '<div class="confidence-patterns-block">' +
+      '<p class="confidence-meta muted">Same-winner streak:</p>' +
+      '<p class="confidence-pattern">' +
+      "<strong>" +
+      escapeHtml(String(streak.length)) +
+      "× " +
+      escapeHtml(streak.suit_label || suitCode || "?") +
+      " (" +
+      escapeHtml(suitCode || "?") +
+      ")</strong>" +
+      (pick
+        ? "<br>Likely next: " +
+          suitCodeBadge(pick) +
+          " · " +
+          escapeHtml(String(streak.confidence_pct || 0)) +
+          "% · " +
+          escapeHtml(tier)
+        : "") +
+      (streak.match_count
+        ? "<br>" +
+          escapeHtml(String(streak.match_count)) +
+          " similar streak(s) in history"
+        : "") +
+      (streak.pick_correct === true
+        ? '<br><span class="confidence-outcome is-correct">Streak pick was right</span>'
+        : streak.pick_correct === false
+          ? '<br><span class="confidence-outcome is-wrong">Streak pick was wrong</span>'
+          : "") +
+      "</p></div>"
+    );
+  }
+
+  function renderAccuracy(stats) {
+    if (!accuracyEl) return;
+    if (!stats || !stats.resolved) {
+      accuracyEl.textContent =
+        "Streak accuracy: no finished streak forecasts yet (updates after games complete).";
+      return;
+    }
+    const pct = stats.accuracy_pct != null ? String(stats.accuracy_pct) + "%" : "—";
+    accuracyEl.innerHTML =
+      "<strong>Streak accuracy: " +
+      escapeHtml(pct) +
+      "</strong> — " +
+      escapeHtml(String(stats.correct)) +
+      " correct / " +
+      escapeHtml(String(stats.resolved)) +
+      " resolved" +
+      (stats.wrong ? " (" + escapeHtml(String(stats.wrong)) + " wrong)" : "");
+  }
+
   function renderItem(item) {
     const tier = String(item.tier || "NONE").toUpperCase();
     const pick = item.pick;
@@ -282,6 +357,7 @@
     const pickColor = (meta[String(pick)] && meta[String(pick)].color) || "#ddd";
     const gameId = String(item.game_id || "");
     const label = tierLabel(tier);
+    const streak = item.streak || null;
     return (
       '<article class="confidence-item ' +
       tierClass(tier) +
@@ -313,6 +389,7 @@
       " similar game(s)" +
       (item.has_conflict ? " · mixed signals" : "") +
       "</p>" +
+      renderStreak(streak) +
       renderPatterns(item.patterns || []) +
       renderAllRows(item.all_rows || []) +
       (hasOutcome(item)
@@ -410,6 +487,7 @@
     try {
       const data = await live.get("/api/winner-confidence?limit=200");
       const items = data.items || [];
+      renderAccuracy(data.streak_accuracy || null);
       const focusId = queryGameId();
       const visible = items.filter(isDisplayable);
       const willInitialFocus = Boolean(focusId && !initialFocusDone);

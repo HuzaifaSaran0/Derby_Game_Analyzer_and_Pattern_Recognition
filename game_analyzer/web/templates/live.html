@@ -49,7 +49,7 @@
       <span class="winner-search-label">Group size</span>
       <div class="winner-search-size-btns" data-winner-search-sizes>
         {% for n in winner_hint_lengths %}
-        <button type="button" class="winner-search-size-btn{% if n == 4 %} is-active{% endif %}" data-size="{{ n }}">{{ n }}</button>
+        <button type="button" class="winner-search-size-btn{% if n == winner_hint_lengths[0] %} is-active{% endif %}" data-size="{{ n }}">{{ n }}</button>
         {% endfor %}
       </div>
     </div>

@@ -4,9 +4,10 @@
 {% block content %}
 <section class="panel confidence-head">
   <h2 class="panel-title">Forecasts</h2>
-  <p class="panel-sub">Forecasts we made during live play when history pointed to a clear next winner — and how each game actually finished.</p>
-  <p class="panel-sub muted">Only <strong>Medium</strong> and <strong>High</strong> forecasts are shown here (the same levels that trigger alerts). Low and none are hidden.</p>
+  <p class="panel-sub">Same-winner streak forecasts from live play — and how each game actually finished. Sequence patterns (last 6–10) are logged here too but only streaks send Slack alerts.</p>
+  <p class="panel-sub muted">Alerts fire for streak length <strong>≥3</strong> (Medium/High), or length <strong>2</strong> only when history has enough cases (≥5).</p>
   <p class="panel-sub winner-hints-legend muted">1 = Spades · 2 = Hearts · 3 = Clubs · 4 = Diamonds</p>
+  <p class="panel-sub" data-streak-accuracy>Streak accuracy: loading…</p>
 </section>
 
 <section class="panel">

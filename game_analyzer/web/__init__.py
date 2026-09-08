@@ -28,6 +28,7 @@ from game_analyzer.similarity import NEAR_SHARED_MIN, draw_round_cards, friendly
 from game_analyzer.store import GameStore
 from game_analyzer.winner_hints import (
     HINT_LENGTHS,
+    compute_streak_accuracy,
     confidence_log_path_from_config,
     dedupe_winner_hint_items,
     enrich_with_game_outcome,
@@ -63,7 +64,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "57"
+STATIC_VER = "59"
 
 
 def _is_public_path(path: str, method: str) -> bool:
@@ -670,7 +671,14 @@ def create_app(
         items = read_confidence_log(settings_path, limit=limit)
         items = reconcile_forecasts_with_alerts(items, settings.log_path, limit=limit)
         enriched = [enrich_with_game_outcome(dict(entry), store) for entry in items]
-        return JSONResponse({"items": enriched, "total": len(enriched)}, headers=NO_CACHE)
+        return JSONResponse(
+            {
+                "items": enriched,
+                "total": len(enriched),
+                "streak_accuracy": compute_streak_accuracy(settings_path),
+            },
+            headers=NO_CACHE,
+        )
 
     @app.get("/unfinished", response_class=HTMLResponse)
     def unfinished_page(request: Request):

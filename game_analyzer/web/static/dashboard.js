@@ -239,14 +239,14 @@
 
   function initWinnerSearch() {
     const meta = readJsonScript("winner-suit-meta", {});
-    const lengths = readJsonScript("winner-hint-lengths", [4, 5, 6, 7, 8, 9, 10]);
+    const lengths = readJsonScript("winner-hint-lengths", [6, 7, 8, 9, 10]);
     const legend = document.querySelector("[data-winner-search-legend]");
     const pickersEl = document.querySelector("[data-winner-search-pickers]");
     const sizeBtns = document.querySelectorAll("[data-winner-search-sizes] [data-size]");
     const runBtn = document.querySelector("[data-winner-search-run]");
     if (!pickersEl || !runBtn) return;
 
-    let groupSize = lengths[0] || 4;
+    let groupSize = lengths[0] || 6;
 
     if (legend) {
       legend.textContent = "1=Spades · 2=Hearts · 3=Clubs · 4=Diamonds";

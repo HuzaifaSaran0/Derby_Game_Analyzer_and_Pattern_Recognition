@@ -63,7 +63,14 @@ SUIT_META: dict[str, dict[str, str]] = {
 
 HINT_LEGEND = "1=Spades · 2=Hearts · 3=Clubs · 4=Diamonds"
 
-HINT_LENGTHS: tuple[int, ...] = tuple(range(4, 11))  # 4..10
+HINT_LENGTHS: tuple[int, ...] = tuple(range(6, 11))  # 6..10 sequence tails
+STREAK_MIN = 2
+STREAK_MAX = 7
+STREAK_LENGTHS: tuple[int, ...] = tuple(range(STREAK_MIN, STREAK_MAX + 1))
+# Slack/bell: length ≥3 always (if MEDIUM/HIGH); length 2 only with a larger sample.
+STREAK_NOTIFY_MIN_LENGTH = 3
+STREAK_LENGTH_2_MIN_CASES = 5
+_TIER_RANK = {"NONE": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3}
 
 
 def winner_code(suit: str | None) -> int | None:
@@ -113,6 +120,170 @@ def analyze_tail(finished_codes: list[int], length: int) -> HintRow | None:
     if length < 1 or n < length:
         return None
     return search_pattern(finished_codes, tuple(finished_codes[-length:]))
+
+
+def current_winner_streak(
+    finished_codes: list[int],
+    *,
+    min_length: int = STREAK_MIN,
+    max_length: int = STREAK_MAX,
+) -> tuple[int, int] | None:
+    """Longest trailing same-suit streak at the end of finished winners.
+
+    Returns ``(suit_code, length)`` or None when the streak is shorter than ``min_length``.
+    """
+    if min_length < 1 or max_length < min_length or len(finished_codes) < min_length:
+        return None
+    suit = finished_codes[-1]
+    length = 1
+    for idx in range(len(finished_codes) - 2, -1, -1):
+        if finished_codes[idx] != suit:
+            break
+        length += 1
+        if length >= max_length:
+            break
+    if length < min_length:
+        return None
+    return suit, min(length, max_length)
+
+
+def analyze_suit_streak(
+    finished_codes: list[int],
+    suit_code: int,
+    length: int,
+) -> HintRow | None:
+    """Tally next winners after historical runs of ``length`` consecutive ``suit_code``."""
+    if length < 1 or suit_code not in CODE_TO_SYMBOL:
+        return None
+    pattern = tuple([suit_code] * length)
+    return search_pattern(finished_codes, pattern)
+
+
+def compute_streak_confidence(
+    finished_codes: list[int],
+    *,
+    min_matches: int = 2,
+    min_pct: int = 50,
+) -> tuple[LiveConfidence, HintRow | None]:
+    """Suit-specific streak forecast for the longest trailing same-winner run (2–7)."""
+    streak = current_winner_streak(finished_codes)
+    if streak is None:
+        return (
+            LiveConfidence(
+                pick=None,
+                confidence_pct=0,
+                tier="NONE",
+                supporting_patterns=(),
+                total_cases=0,
+                has_conflict=False,
+                skipped_reason="No trailing same-winner streak (need ≥2 identical winners).",
+            ),
+            None,
+        )
+    suit_code, length = streak
+    row = analyze_suit_streak(finished_codes, suit_code, length)
+    if row is None:
+        return (
+            LiveConfidence(
+                pick=None,
+                confidence_pct=0,
+                tier="NONE",
+                supporting_patterns=(),
+                total_cases=0,
+                has_conflict=False,
+                skipped_reason="Could not analyze current winner streak.",
+            ),
+            None,
+        )
+    return compute_live_confidence([row], min_matches=min_matches, min_pct=min_pct), row
+
+
+def streak_should_notify(
+    confidence: LiveConfidence,
+    row: HintRow | None,
+) -> bool:
+    """MEDIUM/HIGH streak alerts: length ≥3, or length 2 only with a larger sample."""
+    if row is None:
+        return False
+    if confidence.tier not in NOTIFY_TIERS or not confidence.supporting_patterns:
+        return False
+    if row.length >= STREAK_NOTIFY_MIN_LENGTH:
+        return True
+    if row.length == 2:
+        cases = max(confidence.total_cases, row.match_count)
+        return cases >= STREAK_LENGTH_2_MIN_CASES
+    return False
+
+
+def compute_streak_accuracy(path: Path, *, limit: int = 2000) -> dict[str, Any]:
+    """Accuracy of notified / alert-tier streak forecasts that already finished."""
+    items = read_confidence_log(path, limit=limit)
+    resolved = 0
+    correct = 0
+    for item in items:
+        streak = item.get("streak")
+        if not isinstance(streak, dict):
+            continue
+        tier = str(streak.get("tier") or "").upper()
+        if not streak.get("notified") and tier not in NOTIFY_TIERS:
+            continue
+        pick = streak.get("pick")
+        if pick is None or pick == "":
+            continue
+        actual = streak.get("actual_winner")
+        if actual is None:
+            actual = item.get("actual_winner")
+        if actual is None:
+            continue
+        resolved += 1
+        pick_correct = streak.get("pick_correct")
+        if pick_correct is None:
+            pick_correct = int(pick) == int(actual)
+        if pick_correct:
+            correct += 1
+    wrong = max(0, resolved - correct)
+    pct = int(round(100 * correct / resolved)) if resolved else None
+    return {
+        "resolved": resolved,
+        "correct": correct,
+        "wrong": wrong,
+        "accuracy_pct": pct,
+    }
+
+
+def _apply_streak_outcome(entry: dict[str, Any], actual_code: int) -> None:
+    streak = entry.get("streak")
+    if not isinstance(streak, dict):
+        return
+    pick = streak.get("pick")
+    streak["actual_winner"] = actual_code
+    streak["actual_winner_label"] = CODE_TO_SUIT.get(actual_code, "")
+    if pick is None or pick == "":
+        streak["pick_correct"] = None
+    else:
+        streak["pick_correct"] = int(pick) == actual_code
+    entry["streak"] = streak
+
+
+def _prefer_confidence(*candidates: LiveConfidence) -> LiveConfidence:
+    """Pick the strongest forecast (tier, then hit rate, then sample size)."""
+    best = candidates[0]
+    for item in candidates[1:]:
+        best_key = (
+            _TIER_RANK.get(best.tier, 0),
+            best.confidence_pct,
+            best.total_cases,
+            len(best.supporting_patterns),
+        )
+        item_key = (
+            _TIER_RANK.get(item.tier, 0),
+            item.confidence_pct,
+            item.total_cases,
+            len(item.supporting_patterns),
+        )
+        if item_key > best_key:
+            best = item
+    return best
 
 
 def search_pattern(finished_codes: list[int], pattern: tuple[int, ...]) -> HintRow:
@@ -252,7 +423,7 @@ def _row_summary(row: HintRow) -> str:
 def _lead_summary(rows: list[HintRow]) -> str:
     with_matches = [r for r in rows if r.match_count > 0]
     if not with_matches:
-        return "No matching winner runs in history for lengths 4–10 yet."
+        return "No matching winner runs in history for lengths 6–10 yet."
 
     def score(r: HintRow) -> tuple[int, int]:
         top = max(r.follow_up_counts.values()) if r.match_count else 0
@@ -303,6 +474,25 @@ def live_winner_hints(store: GameStore) -> dict[str, Any]:
                     ),
                 )
             ),
+            "streak": _streak_payload(
+                *compute_streak_confidence(finished_codes)
+                if len(finished_codes) >= STREAK_MIN
+                else (
+                    LiveConfidence(
+                        pick=None,
+                        confidence_pct=0,
+                        tier="NONE",
+                        supporting_patterns=(),
+                        total_cases=0,
+                        has_conflict=False,
+                        skipped_reason=(
+                            f"Need at least {STREAK_MIN} finished games for streak forecasts "
+                            f"({len(finished_codes)} so far)."
+                        ),
+                    ),
+                    None,
+                )
+            ),
             "rows": [],
         }
 
@@ -317,6 +507,7 @@ def live_winner_hints(store: GameStore) -> dict[str, Any]:
         payload_rows.append(_row_payload(row, summary=_row_summary(row)))
 
     confidence = compute_live_confidence(rows)
+    streak_confidence, streak_row = compute_streak_confidence(finished_codes)
 
     return {
         "legend": HINT_LEGEND,
@@ -325,6 +516,7 @@ def live_winner_hints(store: GameStore) -> dict[str, Any]:
         "lengths": list(HINT_LENGTHS),
         "lead_summary": _lead_summary(rows),
         "confidence": live_confidence_payload(confidence),
+        "streak": _streak_payload(streak_confidence, streak_row),
         "rows": payload_rows,
     }
 
@@ -464,7 +656,7 @@ def compute_live_confidence(
     min_matches: int = 2,
     min_pct: int = 50,
 ) -> LiveConfidence:
-    """Combine trusted rows 4–10 into one pick, score, and tier."""
+    """Combine trusted sequence rows 6–10 into one pick, score, and tier."""
     trusted = evaluate_winner_hint_alerts(rows, min_matches=min_matches, min_pct=min_pct)
     if not trusted:
         return LiveConfidence(
@@ -596,6 +788,40 @@ def live_confidence_payload(confidence: LiveConfidence) -> dict[str, Any]:
     }
 
 
+def _streak_payload(
+    confidence: LiveConfidence,
+    row: HintRow | None,
+) -> dict[str, Any]:
+    base = live_confidence_payload(confidence)
+    if row is None:
+        base.update(
+            {
+                "kind": "streak",
+                "length": 0,
+                "suit_code": None,
+                "suit_label": "",
+                "tail": "",
+                "match_count": 0,
+                "follow_up_counts": {},
+            }
+        )
+        return base
+    suit_code = row.tail[0] if row.tail else None
+    base.update(
+        {
+            "kind": "streak",
+            "length": row.length,
+            "suit_code": suit_code,
+            "suit_label": CODE_TO_SUIT.get(suit_code, "") if suit_code else "",
+            "tail": row.tail_text,
+            "match_count": row.match_count,
+            "follow_up_counts": {str(k): v for k, v in row.follow_up_counts.items()},
+            "patterns": [_pattern_payload(p) for p in confidence.supporting_patterns],
+        }
+    )
+    return base
+
+
 def confidence_log_path_from_config(config: dict[str, Any]) -> Path:
     hints = config.get("winner_hints") or {}
     raw = hints.get("confidence_log_path")
@@ -621,9 +847,12 @@ def build_confidence_log_entry(
     confidence: LiveConfidence,
     rows: list[HintRow],
     notified: bool,
+    streak_confidence: LiveConfidence | None = None,
+    streak_row: HintRow | None = None,
+    streak_notified: bool = False,
 ) -> dict[str, Any]:
     pick = confidence.pick
-    return {
+    entry = {
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "game_id": game_id,
         "pick": pick,
@@ -642,6 +871,27 @@ def build_confidence_log_entry(
         "pick_correct": None,
         "resolved_at": None,
     }
+    if streak_confidence is not None:
+        streak_payload = _streak_payload(streak_confidence, streak_row)
+        streak_payload["notified"] = streak_notified
+        entry["streak"] = streak_payload
+        # Display fields: show the stronger of sequence vs streak on Forecasts.
+        primary = _prefer_confidence(confidence, streak_confidence)
+        if primary is streak_confidence and streak_confidence.pick is not None:
+            entry["pick"] = streak_confidence.pick
+            entry["pick_label"] = CODE_TO_SUIT.get(streak_confidence.pick, "")
+            entry["confidence_pct"] = streak_confidence.confidence_pct
+            entry["tier"] = streak_confidence.tier
+            entry["supporting_count"] = len(streak_confidence.supporting_patterns)
+            entry["total_cases"] = streak_confidence.total_cases
+            entry["has_conflict"] = streak_confidence.has_conflict
+            entry["skipped_reason"] = streak_confidence.skipped_reason
+            if not entry["patterns"]:
+                entry["patterns"] = [_pattern_payload(p) for p in streak_confidence.supporting_patterns]
+        entry["notified"] = bool(notified or streak_notified)
+        entry["sequence_tier"] = confidence.tier
+        entry["sequence_pick"] = confidence.pick
+    return entry
 
 
 def append_confidence_log(path: Path, entry: dict[str, Any]) -> None:
@@ -762,11 +1012,14 @@ def confidence_already_logged(path: Path, game_id: str) -> bool:
     return False
 
 
-def forecast_alert_already_sent(path: Path, game_id: str) -> bool:
+def forecast_alert_already_sent(path: Path, game_id: str, *, streak: bool = False) -> bool:
     """True when alerts.log already has a winner-hint row for this live game."""
     if not game_id or not path.is_file():
         return False
-    marker = f"[WINNER-HINT] Game {game_id}"
+    if streak:
+        marker = f"[WINNER-HINT] Game {game_id} — streak"
+    else:
+        marker = f"[WINNER-HINT] Game {game_id} — next winner likely"
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -779,9 +1032,9 @@ def evaluate_game_start_forecast(
     config: dict[str, Any],
     game_id: str,
 ) -> LiveConfidence | None:
-    """Once per game (first saved shot): run lengths 4–10, log tier, notify if MEDIUM/HIGH.
+    """Once per game (first saved shot): sequence 6–10 + streak 2–7.
 
-    Returns the computed confidence, or None when skipped (already evaluated / not enough history).
+    Sequence stays on Forecasts/logging. Slack/bell notify only for streak MEDIUM/HIGH.
     """
     if not game_id:
         return None
@@ -795,21 +1048,54 @@ def evaluate_game_start_forecast(
         return None
 
     finished_codes = finished_winner_codes(store)
-    if len(finished_codes) < min(HINT_LENGTHS):
+    can_sequence = len(finished_codes) >= min(HINT_LENGTHS)
+    can_streak = len(finished_codes) >= STREAK_MIN
+    if not can_sequence and not can_streak:
         return None
 
     rows: list[HintRow] = []
-    for length in HINT_LENGTHS:
-        row = analyze_tail(finished_codes, length)
-        if row is not None:
-            rows.append(row)
+    if can_sequence:
+        for length in HINT_LENGTHS:
+            row = analyze_tail(finished_codes, length)
+            if row is not None:
+                rows.append(row)
+        confidence = compute_live_confidence(rows)
+    else:
+        confidence = LiveConfidence(
+            pick=None,
+            confidence_pct=0,
+            tier="NONE",
+            supporting_patterns=(),
+            total_cases=0,
+            has_conflict=False,
+            skipped_reason=(
+                f"Need at least {min(HINT_LENGTHS)} finished games for sequence forecasts "
+                f"({len(finished_codes)} so far)."
+            ),
+        )
 
-    confidence = compute_live_confidence(rows)
+    streak_confidence, streak_row = (
+        compute_streak_confidence(finished_codes)
+        if can_streak
+        else (
+            LiveConfidence(
+                pick=None,
+                confidence_pct=0,
+                tier="NONE",
+                supporting_patterns=(),
+                total_cases=0,
+                has_conflict=False,
+                skipped_reason="Not enough finished games for streak forecasts.",
+            ),
+            None,
+        )
+    )
+
     log_confidence = hints_cfg.get("confidence_log", True) is not False
-    should_notify = (
-        hints_cfg.get("notify", True) is not False
-        and confidence.tier in NOTIFY_TIERS
-        and bool(confidence.supporting_patterns)
+    notify_enabled = hints_cfg.get("notify", True) is not False
+    # Slack / bell: same-winner streaks only (sequence stays logged for Forecasts).
+    should_notify_streak = notify_enabled and streak_should_notify(
+        streak_confidence, streak_row
     )
 
     if log_confidence:
@@ -819,41 +1105,43 @@ def evaluate_game_start_forecast(
                 game_id=game_id,
                 confidence=confidence,
                 rows=rows,
-                notified=should_notify,
+                notified=False,
+                streak_confidence=streak_confidence,
+                streak_row=streak_row,
+                streak_notified=should_notify_streak,
             ),
         )
 
-    if not should_notify:
-        return confidence
+    primary = _prefer_confidence(confidence, streak_confidence)
+
+    if not should_notify_streak:
+        return primary
 
     from game_analyzer.alerts import alert_settings_from_config, deliver_winner_hint_alert
 
     settings = alert_settings_from_config(config)
-    if forecast_alert_already_sent(settings.log_path, game_id):
-        return confidence
 
-    patterns = list(confidence.supporting_patterns)
-    dedupe_key = f"game-start:{game_id}"
-    message = format_winner_hint_alert_message(
-        game_id,
-        patterns,
-        confidence_pct=confidence.confidence_pct,
-        tier=confidence.tier,
-    )
-    push_message = format_winner_hint_push_message(
-        game_id,
-        patterns,
-        confidence_pct=confidence.confidence_pct,
-        tier=confidence.tier,
-        public_base_url=settings.public_base_url,
-    )
-    deliver_winner_hint_alert(
-        settings,
-        alert_message=message,
-        push_message=push_message,
-        dedupe_key=dedupe_key,
-    )
-    return confidence
+    if not forecast_alert_already_sent(settings.log_path, game_id, streak=True):
+        patterns = list(streak_confidence.supporting_patterns)
+        deliver_winner_hint_alert(
+            settings,
+            alert_message=format_streak_hint_alert_message(
+                game_id,
+                patterns,
+                confidence_pct=streak_confidence.confidence_pct,
+                tier=streak_confidence.tier,
+            ),
+            push_message=format_streak_hint_push_message(
+                game_id,
+                patterns,
+                confidence_pct=streak_confidence.confidence_pct,
+                tier=streak_confidence.tier,
+                public_base_url=settings.public_base_url,
+            ),
+            dedupe_key=f"game-start-streak:{game_id}",
+        )
+
+    return primary
 
 
 def _read_confidence_log_lines(path: Path) -> list[str]:
@@ -890,6 +1178,7 @@ def resolve_confidence_log_outcome(path: Path, game_id: str, winner_suit: str) -
             entry["actual_winner_label"] = CODE_TO_SUIT.get(code, "")
             entry["pick_correct"] = pick is not None and int(pick) == code
             entry["resolved_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            _apply_streak_outcome(entry, code)
             updated = True
         new_lines.append(json.dumps(entry, separators=(",", ":")))
     if updated:
@@ -925,6 +1214,7 @@ def backfill_confidence_log_outcomes(path: Path, store: GameStore) -> int:
                     entry["actual_winner_label"] = CODE_TO_SUIT.get(code, "")
                     entry["pick_correct"] = pick is not None and int(pick) == code
                     entry["resolved_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                    _apply_streak_outcome(entry, code)
                     updated_count += 1
         new_lines.append(json.dumps(entry, separators=(",", ":")))
     if updated_count:
@@ -973,6 +1263,7 @@ def enrich_with_game_outcome(
                     actual_code=int(item["actual_winner"]),
                 )
             )
+        _apply_streak_outcome(item, int(item["actual_winner"]))
         return item
     game_id = str(item.get("game_id") or "")
     if not game_id:
@@ -986,6 +1277,7 @@ def enrich_with_game_outcome(
     predicted = item.get("next_winner") or item.get("pick")
     predicted_pick = int(predicted) if predicted not in (None, "") else None
     item.update(outcome_payload_for_pick(predicted_pick=predicted_pick, actual_code=actual_code))
+    _apply_streak_outcome(item, actual_code)
     return item
 
 
@@ -1052,7 +1344,7 @@ def winner_hint_confidence_note(patterns: list[dict[str, Any]]) -> str:
 
 
 _PATTERN_RE = re.compile(
-    r"Last\s+(\d+)\s+\(([^)]+)\)\s+(\d+)\s+cases?\s+→\s+(\d+)\s+\((\d+)/(\d+),\s*(\d+)%\)"
+    r"(?:Last|Streak)\s+(\d+)\s+\(([^)]+)\)\s+(\d+)\s+cases?\s+→\s+(\d+)\s+\((\d+)/(\d+),\s*(\d+)%\)"
 )
 
 
@@ -1152,6 +1444,73 @@ def format_winner_hint_alert_message(
     return (
         f"[WINNER-HINT] Game {game_id} — next winner likely {next_code} — "
         f"history {confidence_pct}% ({tier}) — {detail} · link={winner_forecast_link(game_id)}"
+    )
+
+
+def format_streak_hint_alert_message(
+    game_id: str,
+    patterns: list[WinnerHintAlertPattern],
+    *,
+    confidence_pct: int = 0,
+    tier: str = "MEDIUM",
+) -> str:
+    if not patterns:
+        return ""
+    pattern = patterns[0]
+    suit_code = pattern.tail_text.split()[0] if pattern.tail_text else "?"
+    try:
+        suit_label = CODE_TO_SUIT.get(int(suit_code), str(suit_code))
+    except ValueError:
+        suit_label = str(suit_code)
+    next_label = CODE_TO_SUIT.get(pattern.next_code, str(pattern.next_code))
+    return (
+        f"[WINNER-HINT] Game {game_id} — streak {pattern.length}×{suit_code} ({suit_label}) — "
+        f"next winner likely {pattern.next_code} ({next_label}) — "
+        f"history {confidence_pct}% ({tier}) — "
+        f"Streak {pattern.length} ({pattern.tail_text}) "
+        f"{pattern.match_count} similar streaks → {pattern.next_code} "
+        f"({pattern.next_count}/{pattern.match_count}, {pattern.next_pct}%) "
+        f"· link={winner_forecast_link(game_id)}"
+    )
+
+
+def format_streak_hint_push_message(
+    game_id: str,
+    patterns: list[WinnerHintAlertPattern],
+    *,
+    confidence_pct: int = 0,
+    tier: str = "MEDIUM",
+    public_base_url: str = "",
+) -> str:
+    if not patterns:
+        return ""
+    pattern = patterns[0]
+    suit_code = pattern.tail_text.split()[0] if pattern.tail_text else "?"
+    try:
+        suit_label = CODE_TO_SUIT.get(int(suit_code), suit_code)
+    except ValueError:
+        suit_label = suit_code
+    next_label = CODE_TO_SUIT.get(pattern.next_code, str(pattern.next_code))
+    tier_upper = (tier or "MEDIUM").upper()
+    lead = (
+        "Strong streak forecast — HIGH confidence"
+        if tier_upper == "HIGH"
+        else "Good streak forecast — MEDIUM confidence"
+    )
+    link = winner_forecast_link(game_id)
+    base = (public_base_url or "").strip().rstrip("/")
+    if base:
+        link = f"{base}{link}"
+    return "\n".join(
+        [
+            lead,
+            f"Game #{game_id}",
+            f"Same winner streak: {pattern.length}× {suit_label} ({suit_code})",
+            f"Similar streaks in history: {pattern.match_count}",
+            f"Likely next winner: {pattern.next_code} ({next_label})",
+            f"Historical hit rate: {confidence_pct}% ({pattern.next_count}/{pattern.match_count})",
+            f"Open forecasts: {link}",
+        ]
     )
 
 

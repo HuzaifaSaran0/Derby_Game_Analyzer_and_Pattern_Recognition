@@ -92,7 +92,7 @@
     if (!rows || !rows.length) return "";
     return (
       '<details class="confidence-details">' +
-      "<summary>All lengths 4–10 snapshot</summary>" +
+      "<summary>All lengths 6–10 snapshot</summary>" +
       rows
         .map(function (row) {
           const matches = row.match_count || 0;

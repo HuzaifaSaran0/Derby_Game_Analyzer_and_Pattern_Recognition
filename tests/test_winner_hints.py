@@ -119,7 +119,7 @@ def test_live_winner_hints_needs_minimum_finished_games(tmp_path: Path):
     hints = live_winner_hints(store)
     assert hints["finished_games"] == 2
     assert hints["rows"] == []
-    assert "Need at least 4 finished games" in hints["lead_summary"]
+    assert "Need at least 6 finished games" in hints["lead_summary"]
 
 
 def test_live_winner_hints_if_in_progress_only(tmp_path: Path):
