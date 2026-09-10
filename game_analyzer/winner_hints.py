@@ -251,6 +251,95 @@ def compute_streak_accuracy(path: Path, *, limit: int = 2000) -> dict[str, Any]:
     }
 
 
+def last_streak_games_report(
+    store: GameStore, *, limit: int = 50, offset: int = 0
+) -> dict[str, Any]:
+    """Page of finished winners (newest-first) with streak-match context.
+
+    ``offset`` skips newer games: 0 = latest page, 50 = the 50 before that, etc.
+    For each game, history is winners *before* it. A same-suit streak (≥2) with
+    ≥2 similar past streaks is a ``match``.
+    """
+    rows = store.list_finished_winner_rows()
+    coded: list[tuple[dict[str, Any], int]] = []
+    for row in rows:
+        code = winner_code(row.get("winner_suit"))
+        if code is not None:
+            coded.append((row, code))
+
+    total_games = len(coded)
+    offset = max(0, int(offset))
+    limit = max(1, int(limit))
+    end = total_games - offset
+    start = max(0, end - limit)
+    if end <= 0:
+        start = 0
+        end = 0
+
+    items: list[dict[str, Any]] = []
+    for idx in range(start, end):
+        game_row, actual_code = coded[idx]
+        history = [code for _, code in coded[:idx]]
+        streak = current_winner_streak(history)
+        matched = False
+        streak_length = 0
+        streak_suit = None
+        streak_suit_label = ""
+        streak_tail = ""
+        hist_cases = 0
+        hist_best_next = None
+        hist_best_count = 0
+        hist_best_pct = 0
+        if streak is not None:
+            streak_suit, streak_length = streak
+            streak_suit_label = CODE_TO_SUIT.get(streak_suit, "")
+            streak_tail = " ".join(str(streak_suit) for _ in range(streak_length))
+            analyzed = analyze_suit_streak(history, streak_suit, streak_length)
+            if analyzed is not None and analyzed.match_count >= 2:
+                best = _best_follow_up(analyzed)
+                if best is not None:
+                    matched = True
+                    hist_cases = analyzed.match_count
+                    hist_best_next, hist_best_count, hist_best_pct = best
+        items.append(
+            {
+                "game_id": str(game_row.get("game_id") or ""),
+                "started_at": game_row.get("started_at") or "",
+                "finished_at": game_row.get("finished_at") or "",
+                "matched": matched,
+                "streak_length": streak_length,
+                "streak_suit": streak_suit,
+                "streak_suit_label": streak_suit_label,
+                "streak_tail": streak_tail,
+                "history_cases": hist_cases,
+                "history_best_next": hist_best_next,
+                "history_best_next_label": CODE_TO_SUIT.get(hist_best_next, "") if hist_best_next else "",
+                "history_best_count": hist_best_count,
+                "history_best_pct": hist_best_pct,
+                "actual_winner": actual_code,
+                "actual_winner_label": CODE_TO_SUIT.get(actual_code, ""),
+                "history_pick_correct": (
+                    hist_best_next is not None and int(hist_best_next) == actual_code
+                    if matched
+                    else None
+                ),
+            }
+        )
+
+    items.reverse()  # newest first within the page (grid places first cell at top-right)
+    matched_count = sum(1 for item in items if item["matched"])
+    return {
+        "limit": limit,
+        "offset": offset,
+        "total": len(items),
+        "total_games": total_games,
+        "has_older": start > 0,
+        "has_newer": offset > 0,
+        "matched": matched_count,
+        "items": items,
+    }
+
+
 def _apply_streak_outcome(entry: dict[str, Any], actual_code: int) -> None:
     streak = entry.get("streak")
     if not isinstance(streak, dict):

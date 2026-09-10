@@ -41,6 +41,21 @@
   </section>
 </div>
 
+<section class="panel streak-history-panel">
+  <h2 class="panel-title">Last 50 winners</h2>
+  <p class="panel-sub muted">
+    Newest at the top-right, older to the left and down. Tap a cell for that game’s details and screenshots.
+    A ring marks games that had a streak history match before they started.
+  </p>
+  <p class="muted" data-streak-history-status>Loading…</p>
+  <div class="winner-grid" data-winner-grid hidden></div>
+  <div class="winner-grid-pager" data-winner-pager hidden>
+    <button type="button" class="btn" data-winner-prev>Previous 50</button>
+    <span class="muted" data-winner-page-label></span>
+    <button type="button" class="btn" data-winner-next>Next 50</button>
+  </div>
+</section>
+
 <section class="panel winner-search-panel" data-winner-search-panel>
   <h2 class="panel-title">Search winner pattern</h2>
   <p class="panel-sub winner-hints-legend" data-winner-search-legend></p>
@@ -62,9 +77,45 @@
     <p class="winner-hint-summary" data-winner-search-summary></p>
   </div>
 </section>
+
+<div class="game-modal" data-game-modal hidden>
+  <div class="game-modal-backdrop" data-game-modal-close tabindex="-1"></div>
+  <div class="game-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="game-modal-title">
+    <div class="game-modal-head">
+      <h3 id="game-modal-title" data-game-modal-title>Game</h3>
+      <button type="button" class="btn btn-sm" data-game-modal-close aria-label="Close">Close</button>
+    </div>
+    <p class="winner-line">Winner: <strong data-game-modal-winner>—</strong></p>
+    <p class="meta muted" data-game-modal-meta></p>
+    <p class="muted" data-game-modal-streak hidden></p>
+    <div class="game-modal-body">
+      <section>
+        <h4 class="panel-title">Card table</h4>
+        <div data-game-modal-table></div>
+      </section>
+      <section class="shots-panel">
+        <h4 class="panel-title">Screenshots</h4>
+        <p class="empty" data-game-modal-shots-empty hidden>No screenshots for this game yet.</p>
+        <p class="muted" data-game-modal-shots-status>Loading…</p>
+        <div class="shot-grid" data-game-modal-shots></div>
+      </section>
+    </div>
+    <p class="muted"><a data-game-modal-link href="#">Open full game page</a></p>
+  </div>
+</div>
+
+<div id="lightbox" class="lightbox" hidden>
+  <button type="button" class="lightbox-close" aria-label="Close">×</button>
+  <button type="button" class="lightbox-nav lightbox-prev" aria-label="Previous">‹</button>
+  <img alt="" />
+  <button type="button" class="lightbox-nav lightbox-next" aria-label="Next">›</button>
+  <p class="lightbox-status"></p>
+</div>
+
 <script type="application/json" id="winner-suit-meta">{{ winner_suit_meta | tojson }}</script>
 <script type="application/json" id="winner-hint-lengths">{{ winner_hint_lengths | tojson }}</script>
 {% endblock %}
 {% block scripts %}
 <script src="/static/dashboard.js?v={{ static_ver }}"></script>
+<script src="/static/winner-history.js?v={{ static_ver }}"></script>
 {% endblock %}

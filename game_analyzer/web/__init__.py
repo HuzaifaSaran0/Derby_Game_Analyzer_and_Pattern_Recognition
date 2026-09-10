@@ -32,6 +32,7 @@ from game_analyzer.winner_hints import (
     confidence_log_path_from_config,
     dedupe_winner_hint_items,
     enrich_with_game_outcome,
+    last_streak_games_report,
     live_winner_hints_if_in_progress,
     notification_item_from_alert,
     parse_pattern_codes,
@@ -64,7 +65,7 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-STATIC_VER = "59"
+STATIC_VER = "62"
 
 
 def _is_public_path(path: str, method: str) -> bool:
@@ -677,6 +678,16 @@ def create_app(
                 "total": len(enriched),
                 "streak_accuracy": compute_streak_accuracy(settings_path),
             },
+            headers=NO_CACHE,
+        )
+
+    @app.get("/api/streak-history")
+    def api_streak_history(
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
+    ):
+        return JSONResponse(
+            last_streak_games_report(store, limit=limit, offset=offset),
             headers=NO_CACHE,
         )
 
